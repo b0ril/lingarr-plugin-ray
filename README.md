@@ -39,6 +39,8 @@ services:
       PLUGINS_PATH: /app/plugins
     volumes:
       - ./plugins:/app/plugins
+      # Shared with Ray so temp batch SRTs are visible (see Behaviour)
+      - /path/to/ray-output:/volume33/ray-output
 ```
 
 Restart Lingarr and look for:
@@ -66,7 +68,7 @@ Keep Watchtower **disabled** for that image tag, or a Hub pull can replace the c
 |----------|-----|--------|
 | Ray server URL | `ray_endpoint` | e.g. `http://127.0.0.1:8787` (host networking) |
 | Ray API key | `ray_api_key` | Secret / encrypted |
-| Ray processing target | `ray_target` | `local` (preferred) or `cloud` |
+| Ray processing target | `ray_target` | `local` or `cloud` (env: `RAY_TARGET`) |
 | Cues per Ray job | `ray_batch_size` | 1–500, default `200` |
 | Ray job timeout (minutes) | `ray_job_timeout_minutes` | Default `180` |
 
@@ -74,9 +76,10 @@ Enable **batch translation** in Lingarr. Languages are accepted as requested (no
 
 ## Behaviour notes
 
-- Uploads temporary SRT cue batches; Ray translate jobs use `subtitle_upload_id` (not video `upload_id`).
-- JSON requests send explicit `Content-Length` (Ray rejects chunked transfer encoding).
-- Prefer `ray_target=local` for library translation so work stays on-device.
+- **Content-Length:** JSON requests use `ByteArrayContent` (Ray rejects `Transfer-Encoding: chunked` with HTTP 411).
+- **Path-based translate:** Ray’s `/v1/subtitles` translate API needs `subtitle_source=translate` plus **`file_path` and `subtitle_path`** on a path Ray can read. Bare SRT uploads alone return `subtitle_required` / `file_path is required`.
+- The plugin writes each cue-batch SRT to **`/volume33/ray-output/lingarr-tmp/`** and submits paths as **`/out/lingarr-tmp/…`** (Ray’s usual `ray-output` → `/out` mount). Override those constants if your layout differs.
+- **Quota:** with `ray_target=cloud`, each translate job can consume Ray Cloud’s **daily whole-video allowance** (same counter as create-from-video; resets midnight UTC). Prefer `local` when backfilling large libraries without burning Cloud admits.
 
 ## License
 
