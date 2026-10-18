@@ -10,7 +10,7 @@ public sealed class RayPluginManifest : IPluginManifest
     public string DisplayName => "Ray Local";
 
     public string? Description =>
-        "Community plugin: translates subtitle batches with a Ray Headless server (Sunlight). Prefer target local so media stays on your machine; use cloud only when you intend Ray Cloud.";
+        "Community plugin: translates subtitle batches with a Ray Headless server (Sunlight). Use target local when the host can run Sunlight reliably; use cloud for Ray Cloud (shares the daily whole-video allowance with create-from-video).";
 
     public IReadOnlyList<PluginSettingField> Settings { get; } =
     [
@@ -40,7 +40,7 @@ public sealed class RayPluginManifest : IPluginManifest
             Type = PluginSettingType.Text,
             Required = true,
             Default = "local",
-            Description = "Use local for on-device processing or cloud to process on Ray Cloud."
+            Description = "local = on-device Sunlight; cloud = Ray Cloud. Cloud translate shares the daily whole-video admit cap with create-from-video."
         },
         new()
         {

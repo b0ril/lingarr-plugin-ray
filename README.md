@@ -68,7 +68,7 @@ Keep Watchtower **disabled** for that image tag, or a Hub pull can replace the c
 |----------|-----|--------|
 | Ray server URL | `ray_endpoint` | e.g. `http://127.0.0.1:8787` (host networking) |
 | Ray API key | `ray_api_key` | Secret / encrypted |
-| Ray processing target | `ray_target` | `local` or `cloud` (set in Lingarr Settings; Compose `RAY_TARGET` is a hint only on stock Lingarr) |
+| Ray processing target | `ray_target` | `local` (default) or `cloud`. Set in Lingarr Settings; Compose `RAY_TARGET` is a hint only on stock Lingarr. Cloud translate shares the daily whole-video admit cap. |
 | Ray job timeout (minutes) | `ray_job_timeout_minutes` | Default `180` |
 
 Each Lingarr subtitle file becomes **one** Ray translate job (keep Lingarr `max_batch_size=0`).
