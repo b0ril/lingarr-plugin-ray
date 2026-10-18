@@ -19,7 +19,6 @@ namespace Lingarr.Plugin.Ray;
 [PluginProvider("ray")]
 public sealed class RayTranslationService : ITranslationService, IBatchTranslationService, IDisposable
 {
-    private const int MaxCuesPerJob = 500;
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
 
     private readonly ISettingsAccess _settings;
@@ -29,7 +28,6 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
     private string? _apiUrl;
     private string? _apiKey;
     private string _target = "local";
-    private int _cuesPerJob = 200;
     private int _timeoutMinutes = 180;
     private bool _initialized;
 
@@ -64,23 +62,21 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         CancellationToken cancellationToken)
     {
         await InitializeAsync(cancellationToken);
-        var translations = new Dictionary<int, string>();
 
-        foreach (var batch in subtitleBatch.Chunk(_cuesPerJob))
+        // One Lingarr subtitle file (batch) → one Ray translate job.
+        // Lingarr already sends the full SRT when max_batch_size is 0.
+        var batch = subtitleBatch.ToArray();
+        var result = await TranslateSrtBatchAsync(batch, targetLanguage, cancellationToken);
+        if (result.Count != batch.Length)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var result = await TranslateSrtBatchAsync(batch, targetLanguage, cancellationToken);
+            throw new TranslationException(
+                $"Ray returned {result.Count} subtitle cues for a batch of {batch.Length}.");
+        }
 
-            if (result.Count != batch.Length)
-            {
-                throw new TranslationException(
-                    $"Ray returned {result.Count} subtitle cues for a batch of {batch.Length}.");
-            }
-
-            for (var index = 0; index < batch.Length; index++)
-            {
-                translations[batch[index].Position] = result[index];
-            }
+        var translations = new Dictionary<int, string>(batch.Length);
+        for (var index = 0; index < batch.Length; index++)
+        {
+            translations[batch[index].Position] = result[index];
         }
 
         return translations;
@@ -149,8 +145,6 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
                 throw new InvalidOperationException("Ray processing target must be 'local' or 'cloud'.");
             }
 
-            _cuesPerJob = ParseBoundedSetting(
-                await _settings.GetSettingAsync("ray_batch_size"), 200, 1, MaxCuesPerJob);
             _timeoutMinutes = ParseBoundedSetting(
                 await _settings.GetSettingAsync("ray_job_timeout_minutes"), 180, 1, 360);
 

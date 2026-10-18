@@ -44,21 +44,12 @@ public sealed class RayPluginManifest : IPluginManifest
         },
         new()
         {
-            Key = "ray_batch_size",
-            Label = "Cues per Ray job",
-            Type = PluginSettingType.Text,
-            Required = true,
-            Default = "200",
-            Description = "Subtitle cues sent to Ray in each job (1-500)."
-        },
-        new()
-        {
             Key = "ray_job_timeout_minutes",
             Label = "Ray job timeout (minutes)",
             Type = PluginSettingType.Text,
             Required = true,
             Default = "180",
-            Description = "Maximum wait for each Ray translation job."
+            Description = "Maximum wait for each Ray translation job (one job per subtitle file)."
         }
     ];
 }
