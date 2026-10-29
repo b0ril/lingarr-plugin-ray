@@ -145,8 +145,10 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
                 throw new InvalidOperationException("Ray processing target must be 'local' or 'cloud'.");
             }
 
+            // Cloud jobs may sit Queued under allowance_wait until midnight UTC.
+            // Cap high enough to outlast a full daily reset wait (not Hangfire's default 3h).
             _timeoutMinutes = ParseBoundedSetting(
-                await _settings.GetSettingAsync("ray_job_timeout_minutes"), 180, 1, 360);
+                await _settings.GetSettingAsync("ray_job_timeout_minutes"), 1440, 1, 2880);
 
             _httpClient.Timeout = TimeSpan.FromMinutes(
                 Math.Max(sharedHttpSettings.Timeout.TotalMinutes, _timeoutMinutes));

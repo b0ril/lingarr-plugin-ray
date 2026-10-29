@@ -48,8 +48,8 @@ public sealed class RayPluginManifest : IPluginManifest
             Label = "Ray job timeout (minutes)",
             Type = PluginSettingType.Text,
             Required = true,
-            Default = "180",
-            Description = "Maximum wait for each Ray translation job (one job per subtitle file)."
+            Default = "1440",
+            Description = "Maximum wait for each Ray translation job (one job per subtitle file). With ray_target=cloud, Ray may keep jobs Queued until the daily whole-video allowance resets (midnight UTC). Use ≥1440 so Lingarr does not mark Failed while Ray is only paused."
         }
     ];
 }
