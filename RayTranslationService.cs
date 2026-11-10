@@ -8,25 +8,31 @@ using Lingarr.Contracts.Models.Batch;
 using Lingarr.Contracts.Plugins;
 using Lingarr.Contracts.Settings;
 using Lingarr.Contracts.Translation;
+using Lingarr.Plugin.Ray.DeepL;
 using Microsoft.Extensions.Logging;
 
 namespace Lingarr.Plugin.Ray;
 
 /// <summary>
 /// Lingarr community plugin: batch-translates subtitle cues via Ray Headless (Sunlight).
+/// Optional DeepL Pro/Free key: DeepL is tried first; on quota exhaustion Ray keeps working
+/// for the whole file, and DeepL is sticky-skipped until usage reports room again.
 /// Provider id: <c>ray</c>. Plugin API 1.0.
 /// </summary>
 [PluginProvider("ray")]
 public sealed class RayTranslationService : ITranslationService, IBatchTranslationService, IDisposable
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
+    private static readonly DeepLQuotaGate DeepLQuota = new();
 
     private readonly ISettingsAccess _settings;
     private readonly ILogger<RayTranslationService> _logger;
     private readonly HttpClient _httpClient = new();
+    private readonly HttpClient _deepLHttpClient = new();
     private readonly SemaphoreSlim _initializeLock = new(1, 1);
     private string? _apiUrl;
     private string? _apiKey;
+    private string? _deepLApiKey;
     private string _target = "local";
     private int _timeoutMinutes = 180;
     private bool _initialized;
@@ -37,7 +43,10 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         _logger = logger;
     }
 
-    public string? ModelName => "Sunlight (Ray Local)";
+    public string? ModelName =>
+        string.IsNullOrWhiteSpace(_deepLApiKey)
+            ? "Sunlight (Ray Local)"
+            : "DeepL + Sunlight (Ray)";
 
     public async Task<string> TranslateAsync(
         string text,
@@ -63,9 +72,16 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
     {
         await InitializeAsync(cancellationToken);
 
+        var batch = subtitleBatch.ToArray();
+        var deepLResult = await TryTranslateWithDeepLAsync(
+            batch, sourceLanguage, targetLanguage, cancellationToken);
+        if (deepLResult is not null)
+        {
+            return deepLResult;
+        }
+
         // One Lingarr subtitle file (batch) → one Ray translate job.
         // Lingarr already sends the full SRT when max_batch_size is 0.
-        var batch = subtitleBatch.ToArray();
         var result = await TranslateSrtBatchAsync(batch, targetLanguage, cancellationToken);
         if (result.Count != batch.Length)
         {
@@ -104,6 +120,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
     public void Dispose()
     {
         _httpClient.Dispose();
+        _deepLHttpClient.Dispose();
         _initializeLock.Dispose();
     }
 
@@ -137,6 +154,11 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
             }
 
             _apiUrl = baseAddress.ToString().TrimEnd('/');
+            _deepLApiKey = await _settings.GetEncryptedSettingAsync("ray_deepl_api_key");
+            if (string.IsNullOrWhiteSpace(_deepLApiKey))
+            {
+                _deepLApiKey = null;
+            }
 
             var sharedHttpSettings = await _settings.GetHttpSettingsAsync();
             _target = (await _settings.GetSettingAsync("ray_target"))?.Trim().ToLowerInvariant() ?? "local";
@@ -158,11 +180,93 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
             _httpClient.DefaultRequestHeaders.Accept.Add(
                 new MediaTypeWithQualityHeaderValue("application/json"));
 
+            _deepLHttpClient.Timeout = sharedHttpSettings.Timeout;
+
             _initialized = true;
         }
         finally
         {
             _initializeLock.Release();
+        }
+    }
+
+    private async Task<Dictionary<int, string>?> TryTranslateWithDeepLAsync(
+        BatchSubtitleItem[] batch,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_deepLApiKey))
+        {
+            return null;
+        }
+
+        var client = new DeepLClient(
+            _deepLHttpClient,
+            DeepLEndpoint.ResolveBaseUrl(_deepLApiKey),
+            _deepLApiKey);
+
+        try
+        {
+            if (DeepLQuota.IsExhausted)
+            {
+                var usageWhileSkipped = await client.GetUsageAsync(cancellationToken);
+                DeepLQuota.RefreshFromUsage(usageWhileSkipped.AnyLimitReached);
+                if (DeepLQuota.IsExhausted)
+                {
+                    _logger.LogInformation(
+                        "DeepL still over quota ({Count}/{Limit}); translating with Ray.",
+                        usageWhileSkipped.CharacterCount,
+                        usageWhileSkipped.CharacterLimit);
+                    return null;
+                }
+
+                _logger.LogInformation("DeepL quota recovered; using DeepL again.");
+            }
+            else
+            {
+                var usage = await client.GetUsageAsync(cancellationToken);
+                if (usage.AnyLimitReached)
+                {
+                    DeepLQuota.MarkExhausted();
+                    _logger.LogWarning(
+                        "DeepL usage limit reached ({Count}/{Limit}); falling back to Ray for this file.",
+                        usage.CharacterCount,
+                        usage.CharacterLimit);
+                    return null;
+                }
+            }
+
+            var source = DeepLEndpoint.NormalizeLanguageCode(sourceLanguage);
+            var target = DeepLEndpoint.NormalizeLanguageCode(targetLanguage);
+            var texts = batch.Select(item => item.Line ?? string.Empty).ToList();
+            var translated = await client.TranslateAsync(texts, source, target, cancellationToken);
+
+            var translations = new Dictionary<int, string>(batch.Length);
+            for (var index = 0; index < batch.Length; index++)
+            {
+                translations[batch[index].Position] = translated[index];
+            }
+
+            _logger.LogInformation(
+                "Translated {Count} subtitle cues with DeepL ({Source}->{Target}).",
+                batch.Length, source, target);
+            return translations;
+        }
+        catch (DeepLQuotaException ex)
+        {
+            DeepLQuota.MarkExhausted();
+            _logger.LogWarning(ex, "DeepL quota exceeded; falling back to Ray for this file.");
+            return null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "DeepL translation failed; falling back to Ray for this file.");
+            return null;
         }
     }
 

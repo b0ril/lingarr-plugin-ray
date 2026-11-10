@@ -10,7 +10,7 @@ public sealed class RayPluginManifest : IPluginManifest
     public string DisplayName => "Ray Local";
 
     public string? Description =>
-        "Community plugin: translates subtitle batches with a Ray Headless server (Sunlight). Use target local when the host can run Sunlight reliably; use cloud for Ray Cloud (shares the daily whole-video allowance with create-from-video).";
+        "Community plugin: translates subtitle batches with a Ray Headless server (Sunlight). Optional DeepL API key: DeepL is tried first; when DeepL quota is exhausted the whole file falls back to one Ray job and DeepL is skipped until usage recovers.";
 
     public IReadOnlyList<PluginSettingField> Settings { get; } =
     [
@@ -32,6 +32,14 @@ public sealed class RayPluginManifest : IPluginManifest
             Description = "Ray server API key. Stored encrypted by Lingarr.",
             MinLength = 1,
             ValidationErrorMessage = "Value must not be empty"
+        },
+        new()
+        {
+            Key = "ray_deepl_api_key",
+            Label = "DeepL API key (optional)",
+            Type = PluginSettingType.Secret,
+            Required = false,
+            Description = "When set, each subtitle file is translated with DeepL (api.deepl.com or api-free.deepl.com from the key) first. On quota exhaustion the whole file falls back to one Ray job, and DeepL is sticky-skipped until /v2/usage reports room again."
         },
         new()
         {

@@ -2,6 +2,7 @@
 [Oo]bj/
 [Oo]ut/
 out/
+[Tt]est[Rr]esults/
 *.user
 *.suo
 .vs/

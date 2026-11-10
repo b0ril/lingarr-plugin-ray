@@ -13,28 +13,30 @@ Ray is closed-source and may require a license. This plugin is **not** part of L
 
 ## Build (DLL only)
 
-Requires .NET 10 SDK and `Lingarr.Contracts.dll` from a matching Lingarr release (1.3+ / 1.4):
+Requires .NET 10 SDK and `Lingarr.Contracts.dll` from a matching Lingarr release (1.4.x):
 
 ```bash
-docker create --name lingarr-ref lingarr/lingarr:1.4.0
+docker create --name lingarr-ref lingarr/lingarr:1.4.1
 docker cp lingarr-ref:/app/Lingarr.Contracts.dll /tmp/Lingarr.Contracts.dll
 docker rm lingarr-ref
 
 dotnet publish RayLingarrPlugin.csproj -c Release -o ./out \
   -p:LingarrContractsPath=/tmp/Lingarr.Contracts.dll
+
+dotnet test Lingarr.Plugin.Ray.Tests/Lingarr.Plugin.Ray.Tests.csproj \
+  -p:LingarrContractsPath=/tmp/Lingarr.Contracts.dll
 ```
 
 Copy into your plugins folder:
 
-- `Lingarr.Plugin.Ray.dll`
-- `Lingarr.Contracts.dll` (same version Lingarr runs)
+- `Lingarr.Plugin.Ray.dll` (v1.1+ includes optional DeepL → Ray fallback)
 
 ## Deploy (Compose volume)
 
 ```yaml
 services:
   lingarr:
-    image: lingarr/lingarr:1.4.0
+    image: lingarr/lingarr:1.4.1
     environment:
       PLUGINS_PATH: /app/plugins
     volumes:
@@ -49,18 +51,18 @@ Restart Lingarr and look for:
 Loaded plugin /app/plugins/Lingarr.Plugin.Ray.dll (1 manifest(s))
 ```
 
-Select **Ray Local** under **Settings → Services**.
+Select **Ray Local** under **Settings → Services**. Optionally set **DeepL API key**.
 
 ## Deploy (custom image)
 
 This repo’s `Dockerfile` builds stock Lingarr with the plugin baked into `/app/plugins`:
 
 ```bash
-docker build -t lingarr-ray:1.4.0 \
-  --build-arg LINGARR_BASE=lingarr/lingarr:1.4.0 .
+docker build -t lingarr-ray:1.4.1 \
+  --build-arg LINGARR_BASE=lingarr/lingarr:1.4.1 .
 ```
 
-Keep Watchtower **disabled** for that image tag, or a Hub pull can replace the container and drop `/app/plugins`.
+Prefer the volume-mounted DLL model on production hosts. If you bake an image, keep Watchtower **disabled** for that tag, or a Hub pull can replace the container and drop `/app/plugins`.
 
 ## Settings
 
@@ -68,12 +70,23 @@ Keep Watchtower **disabled** for that image tag, or a Hub pull can replace the c
 |----------|-----|--------|
 | Ray server URL | `ray_endpoint` | e.g. `http://127.0.0.1:8787` (host networking) |
 | Ray API key | `ray_api_key` | Secret / encrypted |
+| DeepL API key (optional) | `ray_deepl_api_key` | Secret / encrypted. When set, DeepL translates first; Pro keys use `https://api.deepl.com`, Free keys (`:fx`) use `https://api-free.deepl.com`. |
 | Ray processing target | `ray_target` | `local` (default) or `cloud`. Set in Lingarr Settings; Compose `RAY_TARGET` is a hint only on stock Lingarr. Cloud translate shares the daily whole-video admit cap. |
 | Ray job timeout (minutes) | `ray_job_timeout_minutes` | Default **`1440`** (clamped 1–2880). Must outlast Cloud `allowance_wait` until midnight UTC. |
 
-Each Lingarr subtitle file becomes **one** Ray translate job (keep Lingarr `max_batch_size=0`).
+Each Lingarr subtitle file becomes **one** Ray translate job when Ray is used (keep Lingarr `max_batch_size=0`).
 
 Enable **batch translation** in Lingarr. Languages are accepted as requested (no remote language catalog).
+
+### DeepL primary → Ray fallback
+
+1. If `ray_deepl_api_key` is empty, behaviour is unchanged (Ray only).
+2. Otherwise each batch checks DeepL `/v2/usage`, then translates all cues in one DeepL request.
+3. On quota (`AnyLimitReached` or HTTP 456), the **whole file** falls back to **one** Ray job.
+4. DeepL is then **sticky-skipped** for later jobs until a usage check shows room again (survives across requests in the same Lingarr process; restart also clears it).
+5. Non-quota DeepL errors fall back to Ray for that file only (no sticky skip).
+
+Keep Lingarr `SERVICE_TYPE` as `["ray"]` (or with Ray as the selected service). Do not also select built-in DeepL unless you intend a separate chain.
 
 ## Behaviour notes
 

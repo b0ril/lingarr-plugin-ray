@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="RayLingarrPlugin.csproj" />
+  <Project Path="Lingarr.Plugin.Ray.Tests/Lingarr.Plugin.Ray.Tests.csproj" />
+</Solution>
