@@ -8,18 +8,16 @@ Canonical **Lingarr.Plugin.Ray** source (v1.2+). Stack ops live in [`b0ril/multi
 |------|--------|
 | Provider id | `ray` |
 | Assembly | `Lingarr.Plugin.Ray` |
-| Version | **1.2.0** (configurable DeepL ↔ Ray order) |
+| Version | **1.2.1** (Services-list order + DeepL row API key) |
 | Plugin API | 1.0 (`LingarrPluginApiVersion`) |
 | Interfaces | `ITranslationService`, `IBatchTranslationService` |
-| Setting keys | `ray_endpoint`, `ray_api_key`, **`ray_deepl_api_key`**, **`ray_provider_order`**, `ray_target`, `ray_job_timeout_minutes` |
+| Setting keys | `ray_endpoint`, `ray_api_key`, `ray_target`, `ray_job_timeout_minutes`; optional overrides `ray_deepl_api_key`, `ray_provider_order`. Order and DeepL key normally come from `service_type` + `deepl_api_key`. |
 | Tests | `Lingarr.Plugin.Ray.Tests` — `dotnet test … -p:LingarrContractsPath=/path/to/Lingarr.Contracts.dll` |
 
 ## Hard behaviour (do not regress)
 
 - **One Lingarr subtitle file → one Ray job** when Ray runs (`max_batch_size=0` on the host). Do not reintroduce cue chunking; it multiplies Cloud admits.
-- **`ray_provider_order`:** comma-separated `deepl` / `ray` (any order or single). Default `deepl,ray`. Empty + DeepL key → `deepl,ray`; else `ray`. Unknown tokens ignored; DeepL entries dropped without `ray_deepl_api_key`.
-- **DeepL:** one multi-text `/v2/translate` per file; Pro → `api.deepl.com`, Free `:fx` → `api-free.deepl.com`. Quota (`AnyLimitReached` / HTTP **456**) sticky-skips DeepL until usage recovers. Non-quota DeepL errors → next provider for that file only.
-- **Lingarr SERVICE_TYPE:** keep **`["ray"]` only**. Do not chain built-in DeepL — batch mode skips it; order belongs in this plugin.
+- **`service_type` is the order.** `["ray","deepl"]` = Ray then DeepL; `["deepl","ray"]` = DeepL then Ray. DeepL key is Lingarr's **`deepl_api_key`** on the DeepL row — do not ask the user to paste it under Ray Local. `ray_deepl_api_key` / `ray_provider_order` are empty overrides. Batch mode never calls built-in DeepL; this plugin runs that chain (one DeepL request or one Ray job per file).
 - JSON POSTs to Ray use **`ByteArrayContent` + Content-Length**. Ray rejects chunked bodies with HTTP **411**.
 - Translate submit: `subtitle_source=translate` with **`file_path` and `subtitle_path`** on a path Ray can read.
 - Default temp layout: Lingarr `/volume33/ray-output/lingarr-tmp/` ↔ Ray `/out/lingarr-tmp/`.

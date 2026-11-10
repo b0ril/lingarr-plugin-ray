@@ -72,6 +72,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         CancellationToken cancellationToken)
     {
         await InitializeAsync(cancellationToken);
+        await RefreshChainAsync(cancellationToken);
 
         var batch = subtitleBatch.ToArray();
         Exception? lastError = null;
@@ -189,18 +190,6 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
             }
 
             _apiUrl = baseAddress.ToString().TrimEnd('/');
-            _deepLApiKey = await _settings.GetEncryptedSettingAsync("ray_deepl_api_key");
-            if (string.IsNullOrWhiteSpace(_deepLApiKey))
-            {
-                _deepLApiKey = null;
-            }
-
-            _providerOrder = ProviderOrder.Resolve(
-                await _settings.GetSettingAsync("ray_provider_order"),
-                deepLConfigured: _deepLApiKey is not null);
-            _logger.LogInformation(
-                "Ray plugin provider order: {Order}",
-                string.Join(" → ", _providerOrder));
 
             var sharedHttpSettings = await _settings.GetHttpSettingsAsync();
             _target = (await _settings.GetSettingAsync("ray_target"))?.Trim().ToLowerInvariant() ?? "local";
@@ -230,6 +219,49 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         {
             _initializeLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Re-read each batch so the Services list and the DeepL row's API key apply without a restart.
+    /// Plugin fields <c>ray_deepl_api_key</c> / <c>ray_provider_order</c> are optional overrides only.
+    /// </summary>
+    private async Task RefreshChainAsync(CancellationToken cancellationToken)
+    {
+        var pluginKey = await _settings.GetEncryptedSettingAsync("ray_deepl_api_key");
+        var builtInKey = await _settings.GetEncryptedSettingAsync("deepl_api_key");
+        _deepLApiKey = FirstNonEmpty(pluginKey, builtInKey);
+
+        var previous = string.Join(",", _providerOrder);
+        _providerOrder = ProviderOrder.Resolve(
+            await _settings.GetSettingAsync("ray_provider_order"),
+            await _settings.GetSettingAsync("service_type"),
+            deepLConfigured: _deepLApiKey is not null);
+
+        var next = string.Join(",", _providerOrder);
+        if (!string.Equals(previous, next, StringComparison.Ordinal))
+        {
+            _logger.LogInformation(
+                "Provider order: {Order} (DeepL key: {Source}).",
+                string.Join(" → ", _providerOrder),
+                _deepLApiKey is null
+                    ? "missing"
+                    : string.IsNullOrWhiteSpace(pluginKey) ? "DeepL service" : "Ray Local override");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    private static string? FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+        }
+
+        return null;
     }
 
     private async Task<Dictionary<int, string>?> TryTranslateWithDeepLAsync(

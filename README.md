@@ -70,8 +70,8 @@ Prefer the volume-mounted DLL model on production hosts. If you bake an image, k
 |----------|-----|--------|
 | Ray server URL | `ray_endpoint` | e.g. `http://127.0.0.1:8787` (host networking) |
 | Ray API key | `ray_api_key` | Secret / encrypted |
-| DeepL API key (optional) | `ray_deepl_api_key` | Secret / encrypted. Pro → `https://api.deepl.com`; Free (`:fx`) → `https://api-free.deepl.com`. Required for any order that includes `deepl`. |
-| Provider order | `ray_provider_order` | Comma-separated: `deepl` and/or `ray`. Default **`deepl,ray`**. Examples: `ray,deepl`, `ray`, `deepl`. Empty + DeepL key → `deepl,ray`. |
+| DeepL API key (optional override) | `ray_deepl_api_key` | Leave empty. The key on the **DeepL** service row is used. |
+| Provider order override | `ray_provider_order` | Leave empty. Order is the Services list. |
 | Ray processing target | `ray_target` | `local` (default) or `cloud`. Set in Lingarr Settings; Compose `RAY_TARGET` is a hint only on stock Lingarr. Cloud translate shares the daily whole-video admit cap. |
 | Ray job timeout (minutes) | `ray_job_timeout_minutes` | Default **`1440`** (clamped 1–2880). Must outlast Cloud `allowance_wait` until midnight UTC. |
 
@@ -81,16 +81,17 @@ Enable **batch translation** in Lingarr. Languages are accepted as requested (no
 
 ### Provider order (DeepL ↔ Ray)
 
-Configure order **inside this plugin** — keep Lingarr **Services** as **Ray Local only**. Do **not** also add built-in DeepL as a Lingarr fallback (batch mode skips it).
+Set this on the **Services** list, not under Ray Local:
 
-| `ray_provider_order` | Behaviour |
-|----------------------|-----------|
-| `deepl,ray` (default) | DeepL first; on quota/error → one Ray job for the file |
-| `ray,deepl` | Ray first; on Ray failure → DeepL for the file |
-| `ray` | Ray only |
-| `deepl` | DeepL only (fails the job if DeepL cannot translate) |
+| Services list | What runs |
+|---------------|-----------|
+| Primary **Ray Local**, Fallback **DeepL** | Ray first; if Ray fails, DeepL translates the file |
+| Primary **DeepL**, Fallback **Ray Local** | DeepL first; on quota/error, one Ray job for the file |
+| **Ray Local** only | Ray only |
 
-DeepL quota (`AnyLimitReached` / HTTP 456) **sticky-skips** DeepL until `/v2/usage` recovers (process-lifetime; restart clears). Non-quota DeepL errors skip to the next provider for that file only.
+Put the DeepL API key on the **DeepL** row (the field in your screenshot). Leave **DeepL API key override** and **Provider order override** on Ray Local empty.
+
+Batch mode does not call built-in DeepL itself. This plugin reads that list and `deepl_api_key` and runs both. DeepL quota (HTTP 456 / usage limit) sticky-skips DeepL until usage recovers.
 
 ## Behaviour notes
 

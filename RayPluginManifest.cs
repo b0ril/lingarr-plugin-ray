@@ -10,7 +10,7 @@ public sealed class RayPluginManifest : IPluginManifest
     public string DisplayName => "Ray Local";
 
     public string? Description =>
-        "Community plugin: translates subtitle batches with Ray Headless (Sunlight) and optional DeepL. Set ray_provider_order to deepl,ray or ray,deepl (or a single provider). Keep Lingarr SERVICE_TYPE on ray only — do not also chain built-in DeepL.";
+        "Community plugin: batch-translates with Ray Headless (Sunlight). To add DeepL, put DeepL in the Services list (primary or fallback) and set the API key on the DeepL row. This plugin follows that order because batch mode does not call built-in DeepL. Leave the fields below empty unless you want to override that.";
 
     public IReadOnlyList<PluginSettingField> Settings { get; } =
     [
@@ -36,19 +36,18 @@ public sealed class RayPluginManifest : IPluginManifest
         new()
         {
             Key = "ray_deepl_api_key",
-            Label = "DeepL API key (optional)",
+            Label = "DeepL API key override (optional)",
             Type = PluginSettingType.Secret,
             Required = false,
-            Description = "DeepL Auth Key (Pro → api.deepl.com, Free :fx → api-free.deepl.com). Required for any order that includes deepl. Quota exhaustion sticky-skips DeepL until /v2/usage recovers."
+            Description = "Leave empty. The key on the DeepL service row (deepl_api_key) is used. Fill this only to override that key. Pro keys use api.deepl.com; Free keys ending in :fx use api-free.deepl.com."
         },
         new()
         {
             Key = "ray_provider_order",
-            Label = "Provider order",
+            Label = "Provider order override (optional)",
             Type = PluginSettingType.Text,
             Required = false,
-            Default = "deepl,ray",
-            Description = "Comma-separated providers to try for each subtitle file: deepl and/or ray. Examples: deepl,ray (DeepL first) · ray,deepl (Ray first) · ray · deepl. Empty with a DeepL key defaults to deepl,ray. Keep Lingarr services list as Ray Local only."
+            Description = "Leave empty. Order comes from the Services list (Primary Ray, Fallback DeepL → ray then deepl). Set deepl,ray or ray,deepl only when DeepL is not in that list."
         },
         new()
         {
