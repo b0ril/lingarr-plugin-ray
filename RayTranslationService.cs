@@ -15,8 +15,8 @@ namespace Lingarr.Plugin.Ray;
 
 /// <summary>
 /// Lingarr community plugin: batch-translates subtitle cues via Ray Headless (Sunlight).
-/// Optional DeepL Pro/Free key: DeepL is tried first; on quota exhaustion Ray keeps working
-/// for the whole file, and DeepL is sticky-skipped until usage reports room again.
+/// Optional DeepL Pro/Free key with configurable order (<c>ray_provider_order</c>):
+/// e.g. <c>deepl,ray</c> or <c>ray,deepl</c>. DeepL quota uses a sticky skip until usage recovers.
 /// Provider id: <c>ray</c>. Plugin API 1.0.
 /// </summary>
 [PluginProvider("ray")]
@@ -33,6 +33,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
     private string? _apiUrl;
     private string? _apiKey;
     private string? _deepLApiKey;
+    private IReadOnlyList<string> _providerOrder = [ProviderOrder.Ray];
     private string _target = "local";
     private int _timeoutMinutes = 180;
     private bool _initialized;
@@ -73,13 +74,47 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         await InitializeAsync(cancellationToken);
 
         var batch = subtitleBatch.ToArray();
-        var deepLResult = await TryTranslateWithDeepLAsync(
-            batch, sourceLanguage, targetLanguage, cancellationToken);
-        if (deepLResult is not null)
+        Exception? lastError = null;
+
+        foreach (var provider in _providerOrder)
         {
-            return deepLResult;
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                Dictionary<int, string>? result = provider switch
+                {
+                    ProviderOrder.DeepL => await TryTranslateWithDeepLAsync(
+                        batch, sourceLanguage, targetLanguage, cancellationToken),
+                    ProviderOrder.Ray => await TranslateWithRayAsync(batch, targetLanguage, cancellationToken),
+                    _ => null
+                };
+
+                if (result is not null)
+                {
+                    return result;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (provider == ProviderOrder.Ray)
+            {
+                lastError = ex;
+                _logger.LogWarning(ex, "Ray translation failed; trying next provider in order.");
+            }
         }
 
+        throw new TranslationException(
+            $"All configured providers failed ({string.Join(" → ", _providerOrder)}).",
+            lastError);
+    }
+
+    private async Task<Dictionary<int, string>> TranslateWithRayAsync(
+        BatchSubtitleItem[] batch,
+        string targetLanguage,
+        CancellationToken cancellationToken)
+    {
         // One Lingarr subtitle file (batch) → one Ray translate job.
         // Lingarr already sends the full SRT when max_batch_size is 0.
         var result = await TranslateSrtBatchAsync(batch, targetLanguage, cancellationToken);
@@ -159,6 +194,13 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
             {
                 _deepLApiKey = null;
             }
+
+            _providerOrder = ProviderOrder.Resolve(
+                await _settings.GetSettingAsync("ray_provider_order"),
+                deepLConfigured: _deepLApiKey is not null);
+            _logger.LogInformation(
+                "Ray plugin provider order: {Order}",
+                string.Join(" → ", _providerOrder));
 
             var sharedHttpSettings = await _settings.GetHttpSettingsAsync();
             _target = (await _settings.GetSettingAsync("ray_target"))?.Trim().ToLowerInvariant() ?? "local";

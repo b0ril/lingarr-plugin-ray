@@ -70,7 +70,8 @@ Prefer the volume-mounted DLL model on production hosts. If you bake an image, k
 |----------|-----|--------|
 | Ray server URL | `ray_endpoint` | e.g. `http://127.0.0.1:8787` (host networking) |
 | Ray API key | `ray_api_key` | Secret / encrypted |
-| DeepL API key (optional) | `ray_deepl_api_key` | Secret / encrypted. When set, DeepL translates first; Pro keys use `https://api.deepl.com`, Free keys (`:fx`) use `https://api-free.deepl.com`. |
+| DeepL API key (optional) | `ray_deepl_api_key` | Secret / encrypted. Pro → `https://api.deepl.com`; Free (`:fx`) → `https://api-free.deepl.com`. Required for any order that includes `deepl`. |
+| Provider order | `ray_provider_order` | Comma-separated: `deepl` and/or `ray`. Default **`deepl,ray`**. Examples: `ray,deepl`, `ray`, `deepl`. Empty + DeepL key → `deepl,ray`. |
 | Ray processing target | `ray_target` | `local` (default) or `cloud`. Set in Lingarr Settings; Compose `RAY_TARGET` is a hint only on stock Lingarr. Cloud translate shares the daily whole-video admit cap. |
 | Ray job timeout (minutes) | `ray_job_timeout_minutes` | Default **`1440`** (clamped 1–2880). Must outlast Cloud `allowance_wait` until midnight UTC. |
 
@@ -78,15 +79,18 @@ Each Lingarr subtitle file becomes **one** Ray translate job when Ray is used (k
 
 Enable **batch translation** in Lingarr. Languages are accepted as requested (no remote language catalog).
 
-### DeepL primary → Ray fallback
+### Provider order (DeepL ↔ Ray)
 
-1. If `ray_deepl_api_key` is empty, behaviour is unchanged (Ray only).
-2. Otherwise each batch checks DeepL `/v2/usage`, then translates all cues in one DeepL request.
-3. On quota (`AnyLimitReached` or HTTP 456), the **whole file** falls back to **one** Ray job.
-4. DeepL is then **sticky-skipped** for later jobs until a usage check shows room again (survives across requests in the same Lingarr process; restart also clears it).
-5. Non-quota DeepL errors fall back to Ray for that file only (no sticky skip).
+Configure order **inside this plugin** — keep Lingarr **Services** as **Ray Local only**. Do **not** also add built-in DeepL as a Lingarr fallback (batch mode skips it).
 
-Keep Lingarr `SERVICE_TYPE` as `["ray"]` (or with Ray as the selected service). Do not also select built-in DeepL unless you intend a separate chain.
+| `ray_provider_order` | Behaviour |
+|----------------------|-----------|
+| `deepl,ray` (default) | DeepL first; on quota/error → one Ray job for the file |
+| `ray,deepl` | Ray first; on Ray failure → DeepL for the file |
+| `ray` | Ray only |
+| `deepl` | DeepL only (fails the job if DeepL cannot translate) |
+
+DeepL quota (`AnyLimitReached` / HTTP 456) **sticky-skips** DeepL until `/v2/usage` recovers (process-lifetime; restart clears). Non-quota DeepL errors skip to the next provider for that file only.
 
 ## Behaviour notes
 

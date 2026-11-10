@@ -10,7 +10,7 @@ public sealed class RayPluginManifest : IPluginManifest
     public string DisplayName => "Ray Local";
 
     public string? Description =>
-        "Community plugin: translates subtitle batches with a Ray Headless server (Sunlight). Optional DeepL API key: DeepL is tried first; when DeepL quota is exhausted the whole file falls back to one Ray job and DeepL is skipped until usage recovers.";
+        "Community plugin: translates subtitle batches with Ray Headless (Sunlight) and optional DeepL. Set ray_provider_order to deepl,ray or ray,deepl (or a single provider). Keep Lingarr SERVICE_TYPE on ray only — do not also chain built-in DeepL.";
 
     public IReadOnlyList<PluginSettingField> Settings { get; } =
     [
@@ -39,7 +39,16 @@ public sealed class RayPluginManifest : IPluginManifest
             Label = "DeepL API key (optional)",
             Type = PluginSettingType.Secret,
             Required = false,
-            Description = "When set, each subtitle file is translated with DeepL (api.deepl.com or api-free.deepl.com from the key) first. On quota exhaustion the whole file falls back to one Ray job, and DeepL is sticky-skipped until /v2/usage reports room again."
+            Description = "DeepL Auth Key (Pro → api.deepl.com, Free :fx → api-free.deepl.com). Required for any order that includes deepl. Quota exhaustion sticky-skips DeepL until /v2/usage recovers."
+        },
+        new()
+        {
+            Key = "ray_provider_order",
+            Label = "Provider order",
+            Type = PluginSettingType.Text,
+            Required = false,
+            Default = "deepl,ray",
+            Description = "Comma-separated providers to try for each subtitle file: deepl and/or ray. Examples: deepl,ray (DeepL first) · ray,deepl (Ray first) · ray · deepl. Empty with a DeepL key defaults to deepl,ray. Keep Lingarr services list as Ray Local only."
         },
         new()
         {
