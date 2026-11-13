@@ -8,7 +8,7 @@ Canonical **Lingarr.Plugin.Ray** source (v1.2+). Stack ops live in [`b0ril/multi
 |------|--------|
 | Provider id | `ray` |
 | Assembly | `Lingarr.Plugin.Ray` |
-| Version | **1.2.1** (Services-list order + DeepL row API key) |
+| Version | **1.2.2** (Services-list order, DeepL row key, chunked DeepL, Ray poll retry) |
 | Plugin API | 1.0 (`LingarrPluginApiVersion`) |
 | Interfaces | `ITranslationService`, `IBatchTranslationService` |
 | Setting keys | `ray_endpoint`, `ray_api_key`, `ray_target`, `ray_job_timeout_minutes`; optional overrides `ray_deepl_api_key`, `ray_provider_order`. Order and DeepL key normally come from `service_type` + `deepl_api_key`. |
@@ -17,7 +17,9 @@ Canonical **Lingarr.Plugin.Ray** source (v1.2+). Stack ops live in [`b0ril/multi
 ## Hard behaviour (do not regress)
 
 - **One Lingarr subtitle file → one Ray job** when Ray runs (`max_batch_size=0` on the host). Do not reintroduce cue chunking; it multiplies Cloud admits.
-- **`service_type` is the order.** `["ray","deepl"]` = Ray then DeepL; `["deepl","ray"]` = DeepL then Ray. DeepL key is Lingarr's **`deepl_api_key`** on the DeepL row — do not ask the user to paste it under Ray Local. `ray_deepl_api_key` / `ray_provider_order` are empty overrides. Batch mode never calls built-in DeepL; this plugin runs that chain (one DeepL request or one Ray job per file).
+- **`service_type` is the order.** `["ray","deepl"]` = Ray then DeepL; `["deepl","ray"]` = DeepL then Ray. DeepL key is Lingarr's **`deepl_api_key`** on the DeepL row — do not ask the user to paste it under Ray Local. `ray_deepl_api_key` / `ray_provider_order` stay empty overrides. Batch mode never calls built-in DeepL; this plugin runs that chain.
+- **DeepL requests** are JSON, split under **96 KiB**, and **blank cues are not sent** (DeepL returns HTTP 413 for a whole subtitle file and HTTP 400 when `text` is empty). Quota (HTTP **456** / usage limit) sticky-skips DeepL until `/v2/usage` recovers.
+- **Dropped Ray HTTP** (`ResponseEnded` while polling `/v1/jobs` or downloading the result) is retried. Do not fail the subtitle on one cut connection. A Ray job is still **one file**, not one cue.
 - JSON POSTs to Ray use **`ByteArrayContent` + Content-Length**. Ray rejects chunked bodies with HTTP **411**.
 - Translate submit: `subtitle_source=translate` with **`file_path` and `subtitle_path`** on a path Ray can read.
 - Default temp layout: Lingarr `/volume33/ray-output/lingarr-tmp/` ↔ Ray `/out/lingarr-tmp/`.

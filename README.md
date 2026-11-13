@@ -29,7 +29,7 @@ dotnet test Lingarr.Plugin.Ray.Tests/Lingarr.Plugin.Ray.Tests.csproj \
 
 Copy into your plugins folder:
 
-- `Lingarr.Plugin.Ray.dll` (v1.1+ includes optional DeepL → Ray fallback)
+- `Lingarr.Plugin.Ray.dll` (**1.2.2**: Services-list order, DeepL row key, chunked DeepL, Ray poll retry)
 
 ## Deploy (Compose volume)
 
@@ -51,7 +51,7 @@ Restart Lingarr and look for:
 Loaded plugin /app/plugins/Lingarr.Plugin.Ray.dll (1 manifest(s))
 ```
 
-Select **Ray Local** under **Settings → Services**. Optionally set **DeepL API key**.
+Select **Ray Local** under **Settings → Services**. To add DeepL, add it on that same list and put the API key on the **DeepL** row. Leave the Ray Local DeepL override fields empty.
 
 ## Deploy (custom image)
 
@@ -91,7 +91,7 @@ Set this on the **Services** list, not under Ray Local:
 
 Put the DeepL API key on the **DeepL** row (the field in your screenshot). Leave **DeepL API key override** and **Provider order override** on Ray Local empty.
 
-Batch mode does not call built-in DeepL itself. This plugin reads that list and `deepl_api_key` and runs both. DeepL quota (HTTP 456 / usage limit) sticky-skips DeepL until usage recovers.
+Batch mode does not call built-in DeepL itself. This plugin reads that list and `deepl_api_key` and runs both. DeepL calls are split under 96 KiB and blank cues are skipped (a whole subtitle file is HTTP 413; an empty cue is HTTP 400). A dropped Ray poll or result download is retried. DeepL quota (HTTP 456 / usage limit) sticky-skips DeepL until usage recovers. Failed rows already on the Translations page stay Failed until Retry.
 
 ## Behaviour notes
 
