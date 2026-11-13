@@ -28,18 +28,38 @@ public sealed class DeepLClient
             return [];
         }
 
-        using var content = new MultipartFormDataContent();
-        foreach (var text in texts)
+        var results = texts.Select(text => text ?? string.Empty).ToArray();
+        foreach (var chunk in DeepLRequestSplitter.Chunk(texts))
         {
-            content.Add(new StringContent(text ?? string.Empty, Encoding.UTF8), "text");
+            var translated = await TranslateChunkAsync(
+                chunk.Select(index => texts[index] ?? string.Empty).ToArray(),
+                sourceLanguage,
+                targetLanguage,
+                cancellationToken);
+            for (var index = 0; index < chunk.Length; index++)
+            {
+                results[chunk[index]] = translated[index];
+            }
         }
 
-        content.Add(new StringContent(sourceLanguage, Encoding.UTF8), "source_lang");
-        content.Add(new StringContent(targetLanguage, Encoding.UTF8), "target_lang");
+        return results;
+    }
 
+    private async Task<IReadOnlyList<string>> TranslateChunkAsync(
+        string[] texts,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken)
+    {
+        var payload = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["text"] = texts,
+            ["source_lang"] = sourceLanguage,
+            ["target_lang"] = targetLanguage
+        });
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/v2/translate")
         {
-            Content = content
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("DeepL-Auth-Key", _apiKey);
 
@@ -54,16 +74,16 @@ public sealed class DeepLClient
             throw new InvalidOperationException("DeepL translate response did not include translations.");
         }
 
-        var results = new List<string>(texts.Count);
+        var results = new List<string>(texts.Length);
         foreach (var item in translations.EnumerateArray())
         {
             results.Add(item.GetProperty("text").GetString() ?? string.Empty);
         }
 
-        if (results.Count != texts.Count)
+        if (results.Count != texts.Length)
         {
             throw new InvalidOperationException(
-                $"DeepL returned {results.Count} translations for {texts.Count} texts.");
+                $"DeepL returned {results.Count} translations for {texts.Length} texts.");
         }
 
         return results;

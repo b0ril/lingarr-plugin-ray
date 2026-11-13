@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Lingarr.Plugin.Ray.DeepL;
 using Xunit;
 
@@ -25,6 +26,56 @@ public class DeepLClientTests
         Assert.Equal(HttpMethod.Post, handler.LastMethod);
         Assert.Equal("https://api.deepl.com/v2/translate", handler.LastUri?.ToString());
         Assert.Equal("DeepL-Auth-Key test-key", handler.LastAuthorization);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_KeepsBlankCuesAndDoesNotSendThem()
+    {
+        string? body = null;
+        var handler = new StubHandler(request =>
+        {
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"translations":[{"text":"Здравей"}]}""",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+        var client = new DeepLClient(new HttpClient(handler), "https://api.deepl.com", "test-key");
+
+        var result = await client.TranslateAsync(["Hello", "  ", ""], "EN", "BG", CancellationToken.None);
+
+        Assert.Equal(["Здравей", "  ", ""], result);
+        Assert.Equal(1, handler.CallCount);
+        Assert.Contains("Hello", body);
+        Assert.DoesNotContain("\"  \"", body);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_SplitsPayloadsOverTheDeepLLimit()
+    {
+        var handler = new StubHandler(request =>
+        {
+            using var document = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            var count = document.RootElement.GetProperty("text").GetArrayLength();
+            var items = string.Join(",", Enumerable.Range(0, count).Select(_ => """{"text":"x"}"""));
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"translations\":[" + items + "]}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+        var client = new DeepLClient(new HttpClient(handler), "https://api.deepl.com", "test-key");
+        var texts = Enumerable.Repeat(new string('a', 20_000), 8).ToArray();
+
+        var result = await client.TranslateAsync(texts, "EN", "BG", CancellationToken.None);
+
+        Assert.Equal(8, result.Count);
+        Assert.True(handler.CallCount > 1);
     }
 
     [Fact]
@@ -69,11 +120,13 @@ public class DeepLClientTests
         public HttpMethod? LastMethod { get; private set; }
         public Uri? LastUri { get; private set; }
         public string? LastAuthorization { get; private set; }
+        public int CallCount { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            CallCount++;
             LastMethod = request.Method;
             LastUri = request.RequestUri;
             LastAuthorization = request.Headers.Authorization?.ToString();

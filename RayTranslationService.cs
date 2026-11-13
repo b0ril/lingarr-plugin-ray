@@ -339,7 +339,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "DeepL translation failed; falling back to Ray for this file.");
+            _logger.LogWarning(ex, "DeepL translation failed for this file.");
             return null;
         }
     }
@@ -421,47 +421,75 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
 
         while (true)
         {
-            using var jobsResponse = await SendJsonAsync(
-                HttpMethod.Get,
-                "/v1/jobs",
-                null,
-                timeout.Token);
-            var jobs = jobsResponse.RootElement.GetProperty("jobs");
-            var job = jobs.EnumerateArray().FirstOrDefault(candidate =>
-                candidate.TryGetProperty("job_id", out var id)
-                && id.GetString() == jobId);
-
-            if (job.ValueKind == JsonValueKind.Undefined)
+            JsonDocument jobsResponse;
+            try
             {
-                throw new TranslationException($"Ray job {jobId} disappeared before completing.");
+                jobsResponse = await SendJsonAsync(
+                    HttpMethod.Get,
+                    "/v1/jobs",
+                    null,
+                    timeout.Token);
+            }
+            catch (Exception ex) when (IsTransient(ex) && !timeout.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Ray job list request dropped; retrying {JobId}.", jobId);
+                await Task.Delay(PollInterval, timeout.Token);
+                continue;
             }
 
-            var status = job.GetProperty("status").GetString();
-            if (status == "completed")
+            using (jobsResponse)
             {
-                return;
-            }
+                var jobs = jobsResponse.RootElement.GetProperty("jobs");
+                var job = jobs.EnumerateArray().FirstOrDefault(candidate =>
+                    candidate.TryGetProperty("job_id", out var id)
+                    && id.GetString() == jobId);
 
-            if (status is "failed" or "canceled")
-            {
-                var error = job.TryGetProperty("error", out var errorValue)
-                    ? errorValue.GetString()
-                    : null;
-                throw new TranslationException($"Ray job {jobId} {status}: {error ?? "no details"}");
-            }
+                if (job.ValueKind == JsonValueKind.Undefined)
+                {
+                    throw new TranslationException($"Ray job {jobId} disappeared before completing.");
+                }
 
-            await Task.Delay(PollInterval, timeout.Token);
+                var status = job.GetProperty("status").GetString();
+                if (status == "completed")
+                {
+                    return;
+                }
+
+                if (status is "failed" or "canceled")
+                {
+                    var error = job.TryGetProperty("error", out var errorValue)
+                        ? errorValue.GetString()
+                        : null;
+                    throw new TranslationException($"Ray job {jobId} {status}: {error ?? "no details"}");
+                }
+
+                await Task.Delay(PollInterval, timeout.Token);
+            }
         }
     }
 
     private async Task<byte[]> DownloadResultAsync(string jobId, CancellationToken cancellationToken)
     {
-        using var response = await _httpClient.GetAsync(
-            $"{_apiUrl}/v1/jobs/{Uri.EscapeDataString(jobId)}/result",
-            cancellationToken);
-        await EnsureSuccessAsync(response, cancellationToken);
-        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var response = await _httpClient.GetAsync(
+                    $"{_apiUrl}/v1/jobs/{Uri.EscapeDataString(jobId)}/result",
+                    cancellationToken);
+                await EnsureSuccessAsync(response, cancellationToken);
+                return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            }
+            catch (Exception ex) when (IsTransient(ex) && attempt < 5 && !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Ray result download dropped for {JobId}; retry {Attempt}.", jobId, attempt);
+                await Task.Delay(PollInterval * attempt, cancellationToken);
+            }
+        }
     }
+
+    private static bool IsTransient(Exception exception) =>
+        exception is HttpRequestException or IOException or JsonException;
 
 
     private async Task<JsonDocument> SendJsonAsync(

@@ -7,7 +7,7 @@
     <AssemblyName>Lingarr.Plugin.Ray</AssemblyName>
     <RootNamespace>Lingarr.Plugin.Ray</RootNamespace>
     <Description>Lingarr community plugin for Ray Headless / Sunlight batch subtitle translation.</Description>
-    <Version>1.2.1</Version>
+    <Version>1.2.2</Version>
   </PropertyGroup>
 
   <ItemGroup>
