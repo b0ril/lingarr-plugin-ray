@@ -29,7 +29,7 @@ dotnet test Lingarr.Plugin.Ray.Tests/Lingarr.Plugin.Ray.Tests.csproj \
 
 Copy into your plugins folder:
 
-- `Lingarr.Plugin.Ray.dll` (**1.2.3**: local → configured provider fallbacks → Ray Cloud)
+- `Lingarr.Plugin.Ray.dll` (**1.2.4**: Ray Local → LibreTranslate → DeepL → Ray Cloud, when configured)
 
 ## Deploy (Compose volume)
 
@@ -70,8 +70,9 @@ Prefer the volume-mounted DLL model on production hosts. If you bake an image, k
 |----------|-----|--------|
 | Ray server URL | `ray_endpoint` | e.g. `http://127.0.0.1:8787` (host networking) |
 | Ray API key | `ray_api_key` | Secret / encrypted |
+| LibreTranslate URL (optional) | `ray_libretranslate_endpoint` | Default `http://127.0.0.1:5001`; used only when LibreTranslate is in the provider order. |
 | DeepL API key (optional override) | `ray_deepl_api_key` | Leave empty. The key on the **DeepL** service row is used. |
-| Provider order override | `ray_provider_order` | Leave empty. Order is the Services list. |
+| Provider order override | `ray_provider_order` | Optional comma-separated order, e.g. `ray,libretranslate,deepl`. When set, overrides the Services list. |
 | Ray processing target | `ray_target` | `local` (default) or `cloud`. Set in Lingarr Settings; Compose `RAY_TARGET` is a hint only on stock Lingarr. With `local`, Ray Cloud is attempted after the configured Services-list providers fail. Cloud translate shares the daily whole-video admit cap. |
 | Ray job timeout (minutes) | `ray_job_timeout_minutes` | Default **`1440`** (clamped 1–2880). Must outlast Cloud `allowance_wait` until midnight UTC. |
 
@@ -79,19 +80,20 @@ Each Lingarr subtitle file becomes **one** Ray translate job when Ray is used (k
 
 Enable **batch translation** in Lingarr. Languages are accepted as requested (no remote language catalog).
 
-### Provider order (DeepL ↔ Ray)
+### Provider order
 
-Set this on the **Services** list, not under Ray Local:
+Without an override, the plugin follows the **Services** list. Set `ray_provider_order` under Ray Local to include LibreTranslate or override that order:
 
-| Services list | What runs |
+| Services list / override | What runs |
 |---------------|-----------|
-| Primary **Ray Local**, Fallback **DeepL** | Ray Local first; if it fails, DeepL; if DeepL also fails or is unavailable, Ray Cloud |
-| Primary **DeepL**, Fallback **Ray Local** | DeepL first; on quota/error, Ray Local; if local Ray fails, Ray Cloud |
-| **Ray Local** only | Ray Local first; Ray Cloud if local fails |
+| Ray then DeepL; override empty | Ray Local → DeepL → Ray Cloud |
+| Override `ray,libretranslate,deepl` | Ray Local → LibreTranslate → DeepL → Ray Cloud |
+| Override `deepl,ray` | DeepL → Ray Local → Ray Cloud |
+| Ray only; override empty | Ray Local → Ray Cloud |
 
-Put the DeepL API key on the **DeepL** row (the field in your screenshot). Leave **DeepL API key override** and **Provider order override** on Ray Local empty.
+Put the DeepL API key on the **DeepL** row. Leave **DeepL API key override** on Ray Local empty. LibreTranslate needs no API key; batches are split under 64 KiB and blank cues are preserved but not sent.
 
-Batch mode does not call built-in DeepL itself. This plugin reads that list and `deepl_api_key` and runs both. Ray Cloud fallback occurs only after the configured provider chain fails; successful DeepL use prevents a Cloud job. DeepL calls are split under 96 KiB and blank cues are skipped (a whole subtitle file is HTTP 413; an empty cue is HTTP 400). A dropped Ray poll or result download is retried. DeepL quota (HTTP 456 / usage limit) sticky-skips DeepL until usage recovers; if Ray Local also fails, the chain proceeds to Ray Cloud. Failed rows already on the Translations page stay Failed until Retry.
+Batch mode does not call built-in DeepL itself. This plugin reads the Services list, `ray_provider_order`, and the DeepL service-row key to run the configured chain. Ray Cloud fallback occurs only after the configured provider chain fails. DeepL calls are split under 96 KiB and blank cues are skipped. A dropped Ray poll or result download is retried. DeepL quota (HTTP 456 / usage limit) sticky-skips DeepL until usage recovers. Failed rows already on the Translations page stay Failed until Retry.
 
 ## Behaviour notes
 

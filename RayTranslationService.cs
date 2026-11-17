@@ -9,15 +9,16 @@ using Lingarr.Contracts.Plugins;
 using Lingarr.Contracts.Settings;
 using Lingarr.Contracts.Translation;
 using Lingarr.Plugin.Ray.DeepL;
+using Lingarr.Plugin.Ray.LibreTranslate;
 using Microsoft.Extensions.Logging;
 
 namespace Lingarr.Plugin.Ray;
 
 /// <summary>
 /// Lingarr community plugin: batch-translates subtitle cues via Ray Headless (Sunlight).
-/// Optional DeepL Pro/Free key with configurable order (<c>ray_provider_order</c>):
-/// e.g. <c>deepl,ray</c> or <c>ray,deepl</c>. When Ray is local, Ray Cloud is the final
-/// fallback after the configured providers. DeepL quota uses a sticky skip until usage recovers.
+/// Optional LibreTranslate and DeepL providers can be ordered with
+/// <c>ray_provider_order</c>. When Ray is local, Ray Cloud is the final fallback after
+/// the configured providers. DeepL quota uses a sticky skip until usage recovers.
 /// Provider id: <c>ray</c>. Plugin API 1.0.
 /// </summary>
 [PluginProvider("ray")]
@@ -30,9 +31,11 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
     private readonly ILogger<RayTranslationService> _logger;
     private readonly HttpClient _httpClient = new();
     private readonly HttpClient _deepLHttpClient = new();
+    private readonly HttpClient _libreTranslateHttpClient = new();
     private readonly SemaphoreSlim _initializeLock = new(1, 1);
     private string? _apiUrl;
     private string? _apiKey;
+    private string? _libreTranslateEndpoint;
     private string? _deepLApiKey;
     private IReadOnlyList<string> _providerOrder = [ProviderOrder.Ray];
     private string _target = "local";
@@ -94,6 +97,8 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
                 {
                     ProviderOrder.DeepL => await TryTranslateWithDeepLAsync(
                         batch, sourceLanguage, targetLanguage, cancellationToken),
+                    ProviderOrder.LibreTranslate => await TranslateWithLibreTranslateAsync(
+                        batch, sourceLanguage, targetLanguage, cancellationToken),
                     ProviderOrder.Ray => await TranslateWithRayAsync(
                         batch, targetLanguage, _target, cancellationToken),
                     ProviderOrder.RayCloud => await TranslateWithRayAsync(
@@ -110,13 +115,14 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
             {
                 throw;
             }
-            catch (Exception ex) when (provider is ProviderOrder.Ray or ProviderOrder.RayCloud)
+            catch (Exception ex) when (provider is
+                ProviderOrder.Ray or ProviderOrder.RayCloud or ProviderOrder.LibreTranslate)
             {
                 lastError = ex;
                 _logger.LogWarning(
                     ex,
                     "{Provider} translation failed; trying next provider in order.",
-                    provider == ProviderOrder.RayCloud ? "Ray Cloud" : "Ray");
+                    ProviderName(provider));
             }
         }
 
@@ -124,6 +130,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         {
             ProviderOrder.Ray when _target == "local" => "Ray Local",
             ProviderOrder.Ray => "Ray Cloud",
+            ProviderOrder.LibreTranslate => "LibreTranslate",
             ProviderOrder.DeepL => "DeepL",
             ProviderOrder.RayCloud => "Ray Cloud",
             _ => provider
@@ -180,6 +187,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
     {
         _httpClient.Dispose();
         _deepLHttpClient.Dispose();
+        _libreTranslateHttpClient.Dispose();
         _initializeLock.Dispose();
     }
 
@@ -199,6 +207,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
             }
 
             var endpoint = await _settings.GetSettingAsync("ray_endpoint");
+            var libreTranslateEndpoint = await _settings.GetSettingAsync("ray_libretranslate_endpoint");
             _apiKey = await _settings.GetEncryptedSettingAsync("ray_api_key");
             if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(_apiKey))
             {
@@ -213,6 +222,10 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
             }
 
             _apiUrl = baseAddress.ToString().TrimEnd('/');
+
+            _libreTranslateEndpoint = string.IsNullOrWhiteSpace(libreTranslateEndpoint)
+                ? "http://127.0.0.1:5001"
+                : ResolveHttpEndpoint(libreTranslateEndpoint, "LibreTranslate");
 
             var sharedHttpSettings = await _settings.GetHttpSettingsAsync();
             _target = (await _settings.GetSettingAsync("ray_target"))?.Trim().ToLowerInvariant() ?? "local";
@@ -235,6 +248,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
                 new MediaTypeWithQualityHeaderValue("application/json"));
 
             _deepLHttpClient.Timeout = sharedHttpSettings.Timeout;
+            _libreTranslateHttpClient.Timeout = sharedHttpSettings.Timeout;
 
             _initialized = true;
         }
@@ -245,8 +259,8 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
     }
 
     /// <summary>
-    /// Re-read each batch so the Services list and the DeepL row's API key apply without a restart.
-    /// Plugin fields <c>ray_deepl_api_key</c> / <c>ray_provider_order</c> are optional overrides only.
+    /// Re-read each batch so the Services list and provider settings apply without a restart.
+    /// Plugin fields <c>ray_deepl_api_key</c> / <c>ray_provider_order</c> are optional overrides.
     /// </summary>
     private async Task RefreshChainAsync(CancellationToken cancellationToken)
     {
@@ -287,6 +301,57 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         return null;
     }
 
+    private static string ResolveHttpEndpoint(string endpoint, string name)
+    {
+        var trimmed = endpoint.Trim().TrimEnd('/');
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var baseAddress)
+            || (baseAddress.Scheme != Uri.UriSchemeHttp && baseAddress.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new InvalidOperationException(
+                $"{name} endpoint must be an absolute HTTP or HTTPS URL.");
+        }
+
+        return baseAddress.ToString().TrimEnd('/');
+    }
+
+    private string ProviderName(string provider) => provider switch
+    {
+        ProviderOrder.Ray when _target == "local" => "Ray Local",
+        ProviderOrder.Ray => "Ray Cloud",
+        ProviderOrder.RayCloud => "Ray Cloud",
+        ProviderOrder.LibreTranslate => "LibreTranslate",
+        ProviderOrder.DeepL => "DeepL",
+        _ => provider
+    };
+
+    private async Task<Dictionary<int, string>> TranslateWithLibreTranslateAsync(
+        BatchSubtitleItem[] batch,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken)
+    {
+        var client = new LibreTranslateClient(
+            _libreTranslateHttpClient,
+            _libreTranslateEndpoint ?? "http://127.0.0.1:5001");
+        var texts = batch.Select(item => item.Line ?? string.Empty).ToList();
+        var translated = await client.TranslateAsync(
+            texts,
+            sourceLanguage,
+            targetLanguage,
+            cancellationToken);
+
+        var translations = new Dictionary<int, string>(batch.Length);
+        for (var index = 0; index < batch.Length; index++)
+        {
+            translations[batch[index].Position] = translated[index];
+        }
+
+        _logger.LogInformation(
+            "Translated {Count} subtitle cues with LibreTranslate ({Source}->{Target}).",
+            batch.Length, sourceLanguage, targetLanguage);
+        return translations;
+    }
+
     private async Task<Dictionary<int, string>?> TryTranslateWithDeepLAsync(
         BatchSubtitleItem[] batch,
         string sourceLanguage,
@@ -312,7 +377,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
                 if (DeepLQuota.IsExhausted)
                 {
                     _logger.LogInformation(
-                        "DeepL still over quota ({Count}/{Limit}); translating with Ray.",
+                        "DeepL still over quota ({Count}/{Limit}); skipping it for this file.",
                         usageWhileSkipped.CharacterCount,
                         usageWhileSkipped.CharacterLimit);
                     return null;
@@ -327,7 +392,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
                 {
                     DeepLQuota.MarkExhausted();
                     _logger.LogWarning(
-                        "DeepL usage limit reached ({Count}/{Limit}); falling back to Ray for this file.",
+                        "DeepL usage limit reached ({Count}/{Limit}); skipping it for this file.",
                         usage.CharacterCount,
                         usage.CharacterLimit);
                     return null;
@@ -353,7 +418,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         catch (DeepLQuotaException ex)
         {
             DeepLQuota.MarkExhausted();
-            _logger.LogWarning(ex, "DeepL quota exceeded; falling back to Ray for this file.");
+            _logger.LogWarning(ex, "DeepL quota exceeded; skipping it for this file.");
             return null;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

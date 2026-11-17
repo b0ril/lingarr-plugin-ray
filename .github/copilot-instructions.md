@@ -8,17 +8,18 @@ Canonical **Lingarr.Plugin.Ray** source (v1.2+). Stack ops live in [`b0ril/multi
 |------|--------|
 | Provider id | `ray` |
 | Assembly | `Lingarr.Plugin.Ray` |
-| Version | **1.2.2** (Services-list order, DeepL row key, chunked DeepL, Ray poll retry) |
+| Version | **1.2.4** (Ray Local, LibreTranslate, DeepL, Ray Cloud fallback) |
 | Plugin API | 1.0 (`LingarrPluginApiVersion`) |
 | Interfaces | `ITranslationService`, `IBatchTranslationService` |
-| Setting keys | `ray_endpoint`, `ray_api_key`, `ray_target`, `ray_job_timeout_minutes`; optional overrides `ray_deepl_api_key`, `ray_provider_order`. Order and DeepL key normally come from `service_type` + `deepl_api_key`. |
+| Setting keys | `ray_endpoint`, `ray_api_key`, `ray_target`, `ray_job_timeout_minutes`; optional `ray_libretranslate_endpoint`, `ray_deepl_api_key`, `ray_provider_order`. DeepL key normally comes from `deepl_api_key`. |
 | Tests | `Lingarr.Plugin.Ray.Tests` — `dotnet test … -p:LingarrContractsPath=/path/to/Lingarr.Contracts.dll` |
 
 ## Hard behaviour (do not regress)
 
 - **One Lingarr subtitle file → one Ray job** when Ray runs (`max_batch_size=0` on the host). Do not reintroduce cue chunking; it multiplies Cloud admits.
-- **`service_type` is the order.** `["ray","deepl"]` = Ray then DeepL; `["deepl","ray"]` = DeepL then Ray. DeepL key is Lingarr's **`deepl_api_key`** on the DeepL row — do not ask the user to paste it under Ray Local. `ray_deepl_api_key` / `ray_provider_order` stay empty overrides. Batch mode never calls built-in DeepL; this plugin runs that chain.
+- **Provider order:** by default, use Lingarr's `service_type`; non-empty `ray_provider_order` overrides it and accepts `ray`, `libretranslate`, and `deepl`. For this NAS the explicit order is `ray,libretranslate,deepl`. DeepL key is Lingarr's **`deepl_api_key`** on the DeepL row — do not ask the user to paste it under Ray Local. Batch mode never calls built-in DeepL; this plugin runs the chain.
 - **DeepL requests** are JSON, split under **96 KiB**, and **blank cues are not sent** (DeepL returns HTTP 413 for a whole subtitle file and HTTP 400 when `text` is empty). Quota (HTTP **456** / usage limit) sticky-skips DeepL until `/v2/usage` recovers.
+- **LibreTranslate requests** use the local `/translate` API, are split under **64 KiB**, and preserve blank cues without sending them. Its quality is suitable as a free fallback, not assumed equivalent to DeepL.
 - **Dropped Ray HTTP** (`ResponseEnded` while polling `/v1/jobs` or downloading the result) is retried. Do not fail the subtitle on one cut connection. A Ray job is still **one file**, not one cue.
 - JSON POSTs to Ray use **`ByteArrayContent` + Content-Length**. Ray rejects chunked bodies with HTTP **411**.
 - Translate submit: `subtitle_source=translate` with **`file_path` and `subtitle_path`** on a path Ray can read.

@@ -6,10 +6,10 @@ namespace Lingarr.Plugin.Ray.Tests;
 public class ProviderOrderTests
 {
     [Fact]
-    public void Resolve_UsesServicesListWhenDeepLIsAFallback()
+    public void Resolve_UsesServicesListWhenNoOverrideIsSet()
     {
         var order = ProviderOrder.Resolve(
-            explicitOrder: "deepl,ray",
+            explicitOrder: null,
             serviceType: """["ray","deepl"]""",
             deepLConfigured: true);
 
@@ -17,13 +17,24 @@ public class ProviderOrderTests
     }
 
     [Fact]
+    public void Resolve_UsesExplicitOrderToAddLibreTranslateBeforeDeepL()
+    {
+        var order = ProviderOrder.Resolve(
+            explicitOrder: "ray,libretranslate,deepl",
+            serviceType: """["ray","deepl"]""",
+            deepLConfigured: true);
+
+        Assert.Equal(["ray", "libretranslate", "deepl"], order);
+    }
+
+    [Fact]
     public void WithCloudFallback_AddsRayCloudAfterConfiguredProvidersForLocalTarget()
     {
         var attempts = ProviderOrder.WithCloudFallback(
-            ["ray", "deepl"],
+            ["ray", "libretranslate", "deepl"],
             "local");
 
-        Assert.Equal(["ray", "deepl", "ray-cloud"], attempts);
+        Assert.Equal(["ray", "libretranslate", "deepl", "ray-cloud"], attempts);
     }
 
     [Fact]
@@ -68,7 +79,7 @@ public class ProviderOrderTests
     }
 
     [Fact]
-    public void Resolve_UsesExplicitOrderOnlyWhenDeepLIsNotInTheServicesList()
+    public void Resolve_UsesExplicitOrderWhenDeepLIsNotInTheServicesList()
     {
         var order = ProviderOrder.Resolve(
             explicitOrder: "deepl,ray",

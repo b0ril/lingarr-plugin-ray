@@ -3,16 +3,15 @@ using System.Text.Json;
 namespace Lingarr.Plugin.Ray.DeepL;
 
 /// <summary>
-/// Order of <c>ray</c> / <c>deepl</c> for one subtitle file.
-/// When Lingarr's service list includes DeepL, that list is the order
-/// (Primary Ray + Fallback DeepL → <c>ray,deepl</c>). The DeepL API key
-/// stays on the DeepL row (<c>deepl_api_key</c>).
-/// <c>ray_provider_order</c> applies only when DeepL is not in the service list.
+/// Order of configured providers for one subtitle file.
+/// When set, <c>ray_provider_order</c> overrides Lingarr's Services-list order.
+/// The DeepL API key stays on the DeepL row (<c>deepl_api_key</c>).
 /// </summary>
 public static class ProviderOrder
 {
     public const string Ray = "ray";
     public const string RayCloud = "ray-cloud";
+    public const string LibreTranslate = "libretranslate";
     public const string DeepL = "deepl";
 
     public static IReadOnlyList<string> WithCloudFallback(
@@ -34,9 +33,8 @@ public static class ProviderOrder
         bool deepLConfigured)
     {
         var fromServices = Parse(serviceType);
-        var chosen = fromServices.Contains(DeepL)
-            ? fromServices
-            : Parse(explicitOrder);
+        var fromOverride = Parse(explicitOrder);
+        var chosen = fromOverride.Count > 0 ? fromOverride : fromServices;
 
         if (chosen.Count == 0)
         {
@@ -85,7 +83,7 @@ public static class ProviderOrder
 
         return tokens
             .Select(token => token.Trim().ToLowerInvariant())
-            .Where(token => token is Ray or DeepL)
+            .Where(token => token is Ray or LibreTranslate or DeepL)
             .Distinct()
             .ToList();
     }

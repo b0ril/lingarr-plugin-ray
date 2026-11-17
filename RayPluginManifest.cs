@@ -10,7 +10,7 @@ public sealed class RayPluginManifest : IPluginManifest
     public string DisplayName => "Ray Local";
 
     public string? Description =>
-        "Community plugin: batch-translates with Ray Headless (Sunlight). To add DeepL, put DeepL in the Services list (primary or fallback) and set the API key on the DeepL row. This plugin follows that order because batch mode does not call built-in DeepL. With Ray Local selected, Ray Cloud is the final fallback if the configured providers fail.";
+        "Community plugin: batch-translates with Ray Headless (Sunlight). Optional LibreTranslate and DeepL providers can be ordered with Provider order override; the DeepL key stays on the DeepL service row. With Ray Local selected, Ray Cloud is the final fallback if configured providers fail.";
 
     public IReadOnlyList<PluginSettingField> Settings { get; } =
     [
@@ -35,6 +35,15 @@ public sealed class RayPluginManifest : IPluginManifest
         },
         new()
         {
+            Key = "ray_libretranslate_endpoint",
+            Label = "LibreTranslate URL (optional)",
+            Type = PluginSettingType.Url,
+            Required = false,
+            Default = "http://127.0.0.1:5001",
+            Description = "Base URL of LibreTranslate when selected in Provider order. Host networking uses http://127.0.0.1:5001."
+        },
+        new()
+        {
             Key = "ray_deepl_api_key",
             Label = "DeepL API key override (optional)",
             Type = PluginSettingType.Secret,
@@ -47,7 +56,7 @@ public sealed class RayPluginManifest : IPluginManifest
             Label = "Provider order override (optional)",
             Type = PluginSettingType.Text,
             Required = false,
-            Description = "Leave empty. Order comes from the Services list (Primary Ray, Fallback DeepL → ray then deepl). Set deepl,ray or ray,deepl only when DeepL is not in that list."
+            Description = "Optional comma-separated order, for example ray,libretranslate,deepl. When set, this overrides the Services-list order. DeepL must be configured on its service row."
         },
         new()
         {
