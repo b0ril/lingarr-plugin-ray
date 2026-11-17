@@ -12,7 +12,21 @@ namespace Lingarr.Plugin.Ray.DeepL;
 public static class ProviderOrder
 {
     public const string Ray = "ray";
+    public const string RayCloud = "ray-cloud";
     public const string DeepL = "deepl";
+
+    public static IReadOnlyList<string> WithCloudFallback(
+        IReadOnlyList<string> order,
+        string rayTarget)
+    {
+        if (!string.Equals(rayTarget, "local", StringComparison.OrdinalIgnoreCase)
+            || !order.Contains(Ray, StringComparer.Ordinal))
+        {
+            return order;
+        }
+
+        return [.. order, RayCloud];
+    }
 
     public static IReadOnlyList<string> Resolve(
         string? explicitOrder,

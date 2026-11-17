@@ -16,7 +16,8 @@ namespace Lingarr.Plugin.Ray;
 /// <summary>
 /// Lingarr community plugin: batch-translates subtitle cues via Ray Headless (Sunlight).
 /// Optional DeepL Pro/Free key with configurable order (<c>ray_provider_order</c>):
-/// e.g. <c>deepl,ray</c> or <c>ray,deepl</c>. DeepL quota uses a sticky skip until usage recovers.
+/// e.g. <c>deepl,ray</c> or <c>ray,deepl</c>. When Ray is local, Ray Cloud is the final
+/// fallback after the configured providers. DeepL quota uses a sticky skip until usage recovers.
 /// Provider id: <c>ray</c>. Plugin API 1.0.
 /// </summary>
 [PluginProvider("ray")]
@@ -77,16 +78,26 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         var batch = subtitleBatch.ToArray();
         Exception? lastError = null;
 
-        foreach (var provider in _providerOrder)
+        var attemptOrder = ProviderOrder.WithCloudFallback(_providerOrder, _target);
+        foreach (var provider in attemptOrder)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (provider == ProviderOrder.RayCloud)
+            {
+                _logger.LogInformation(
+                    "Configured providers failed; trying Ray Cloud as the final fallback.");
+            }
+
             try
             {
                 Dictionary<int, string>? result = provider switch
                 {
                     ProviderOrder.DeepL => await TryTranslateWithDeepLAsync(
                         batch, sourceLanguage, targetLanguage, cancellationToken),
-                    ProviderOrder.Ray => await TranslateWithRayAsync(batch, targetLanguage, cancellationToken),
+                    ProviderOrder.Ray => await TranslateWithRayAsync(
+                        batch, targetLanguage, _target, cancellationToken),
+                    ProviderOrder.RayCloud => await TranslateWithRayAsync(
+                        batch, targetLanguage, "cloud", cancellationToken),
                     _ => null
                 };
 
@@ -99,26 +110,38 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
             {
                 throw;
             }
-            catch (Exception ex) when (provider == ProviderOrder.Ray)
+            catch (Exception ex) when (provider is ProviderOrder.Ray or ProviderOrder.RayCloud)
             {
                 lastError = ex;
-                _logger.LogWarning(ex, "Ray translation failed; trying next provider in order.");
+                _logger.LogWarning(
+                    ex,
+                    "{Provider} translation failed; trying next provider in order.",
+                    provider == ProviderOrder.RayCloud ? "Ray Cloud" : "Ray");
             }
         }
 
+        var attemptedProviders = attemptOrder.Select(provider => provider switch
+        {
+            ProviderOrder.Ray when _target == "local" => "Ray Local",
+            ProviderOrder.Ray => "Ray Cloud",
+            ProviderOrder.DeepL => "DeepL",
+            ProviderOrder.RayCloud => "Ray Cloud",
+            _ => provider
+        });
         throw new TranslationException(
-            $"All configured providers failed ({string.Join(" → ", _providerOrder)}).",
+            $"All configured providers failed ({string.Join(" → ", attemptedProviders)}).",
             lastError);
     }
 
     private async Task<Dictionary<int, string>> TranslateWithRayAsync(
         BatchSubtitleItem[] batch,
         string targetLanguage,
+        string rayTarget,
         CancellationToken cancellationToken)
     {
         // One Lingarr subtitle file (batch) → one Ray translate job.
         // Lingarr already sends the full SRT when max_batch_size is 0.
-        var result = await TranslateSrtBatchAsync(batch, targetLanguage, cancellationToken);
+        var result = await TranslateSrtBatchAsync(batch, targetLanguage, rayTarget, cancellationToken);
         if (result.Count != batch.Length)
         {
             throw new TranslationException(
@@ -353,6 +376,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
     private async Task<List<string>> TranslateSrtBatchAsync(
         BatchSubtitleItem[] batch,
         string targetLanguage,
+        string rayTarget,
         CancellationToken cancellationToken)
     {
         var fileName = $"lingarr-ray-{Guid.NewGuid():N}.srt";
@@ -364,7 +388,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
 
         try
         {
-            var jobId = await CreateJobAsync(rayPath, targetLanguage, cancellationToken);
+            var jobId = await CreateJobAsync(rayPath, targetLanguage, rayTarget, cancellationToken);
             await WaitForCompletionAsync(jobId, cancellationToken);
             var translatedSrt = await DownloadResultAsync(jobId, cancellationToken);
             return ParseSrt(Encoding.UTF8.GetString(translatedSrt));
@@ -382,6 +406,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
     private async Task<string> CreateJobAsync(
         string subtitlePath,
         string targetLanguage,
+        string rayTarget,
         CancellationToken cancellationToken)
     {
         // Ray docs: translate with subtitle_source=translate + subtitle_path.
@@ -391,7 +416,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
             ["quality"] = "best",
             ["format"] = "srt",
             ["coverage"] = "standard",
-            ["target"] = _target,
+            ["target"] = rayTarget,
             ["subtitle_source"] = "translate",
             ["target_language"] = targetLanguage,
             ["file_path"] = subtitlePath,
@@ -409,8 +434,9 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
             throw new TranslationException("Ray did not return a job ID.");
         }
 
-        _logger.LogInformation("Submitted subtitle batch {Path} to Ray as job {JobId}.",
-            subtitlePath, jobId);
+        _logger.LogInformation(
+            "Submitted subtitle batch {Path} to Ray ({Target}) as job {JobId}.",
+            subtitlePath, rayTarget, jobId);
         return jobId;
     }
 

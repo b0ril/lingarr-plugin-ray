@@ -10,7 +10,7 @@ public sealed class RayPluginManifest : IPluginManifest
     public string DisplayName => "Ray Local";
 
     public string? Description =>
-        "Community plugin: batch-translates with Ray Headless (Sunlight). To add DeepL, put DeepL in the Services list (primary or fallback) and set the API key on the DeepL row. This plugin follows that order because batch mode does not call built-in DeepL. Leave the fields below empty unless you want to override that.";
+        "Community plugin: batch-translates with Ray Headless (Sunlight). To add DeepL, put DeepL in the Services list (primary or fallback) and set the API key on the DeepL row. This plugin follows that order because batch mode does not call built-in DeepL. With Ray Local selected, Ray Cloud is the final fallback if the configured providers fail.";
 
     public IReadOnlyList<PluginSettingField> Settings { get; } =
     [
@@ -56,7 +56,7 @@ public sealed class RayPluginManifest : IPluginManifest
             Type = PluginSettingType.Text,
             Required = true,
             Default = "local",
-            Description = "local = on-device Sunlight; cloud = Ray Cloud. Cloud translate shares the daily whole-video admit cap with create-from-video."
+            Description = "local = Ray Local, then configured providers (e.g. DeepL), then Ray Cloud if none succeeds; cloud = Ray Cloud directly. Cloud translate shares the daily whole-video admit cap with create-from-video."
         },
         new()
         {

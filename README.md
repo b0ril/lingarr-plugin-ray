@@ -29,7 +29,7 @@ dotnet test Lingarr.Plugin.Ray.Tests/Lingarr.Plugin.Ray.Tests.csproj \
 
 Copy into your plugins folder:
 
-- `Lingarr.Plugin.Ray.dll` (**1.2.2**: Services-list order, DeepL row key, chunked DeepL, Ray poll retry)
+- `Lingarr.Plugin.Ray.dll` (**1.2.3**: local → configured provider fallbacks → Ray Cloud)
 
 ## Deploy (Compose volume)
 
@@ -72,7 +72,7 @@ Prefer the volume-mounted DLL model on production hosts. If you bake an image, k
 | Ray API key | `ray_api_key` | Secret / encrypted |
 | DeepL API key (optional override) | `ray_deepl_api_key` | Leave empty. The key on the **DeepL** service row is used. |
 | Provider order override | `ray_provider_order` | Leave empty. Order is the Services list. |
-| Ray processing target | `ray_target` | `local` (default) or `cloud`. Set in Lingarr Settings; Compose `RAY_TARGET` is a hint only on stock Lingarr. Cloud translate shares the daily whole-video admit cap. |
+| Ray processing target | `ray_target` | `local` (default) or `cloud`. Set in Lingarr Settings; Compose `RAY_TARGET` is a hint only on stock Lingarr. With `local`, Ray Cloud is attempted after the configured Services-list providers fail. Cloud translate shares the daily whole-video admit cap. |
 | Ray job timeout (minutes) | `ray_job_timeout_minutes` | Default **`1440`** (clamped 1–2880). Must outlast Cloud `allowance_wait` until midnight UTC. |
 
 Each Lingarr subtitle file becomes **one** Ray translate job when Ray is used (keep Lingarr `max_batch_size=0`).
@@ -85,13 +85,13 @@ Set this on the **Services** list, not under Ray Local:
 
 | Services list | What runs |
 |---------------|-----------|
-| Primary **Ray Local**, Fallback **DeepL** | Ray first; if Ray fails, DeepL translates the file |
-| Primary **DeepL**, Fallback **Ray Local** | DeepL first; on quota/error, one Ray job for the file |
-| **Ray Local** only | Ray only |
+| Primary **Ray Local**, Fallback **DeepL** | Ray Local first; if it fails, DeepL; if DeepL also fails or is unavailable, Ray Cloud |
+| Primary **DeepL**, Fallback **Ray Local** | DeepL first; on quota/error, Ray Local; if local Ray fails, Ray Cloud |
+| **Ray Local** only | Ray Local first; Ray Cloud if local fails |
 
 Put the DeepL API key on the **DeepL** row (the field in your screenshot). Leave **DeepL API key override** and **Provider order override** on Ray Local empty.
 
-Batch mode does not call built-in DeepL itself. This plugin reads that list and `deepl_api_key` and runs both. DeepL calls are split under 96 KiB and blank cues are skipped (a whole subtitle file is HTTP 413; an empty cue is HTTP 400). A dropped Ray poll or result download is retried. DeepL quota (HTTP 456 / usage limit) sticky-skips DeepL until usage recovers. Failed rows already on the Translations page stay Failed until Retry.
+Batch mode does not call built-in DeepL itself. This plugin reads that list and `deepl_api_key` and runs both. Ray Cloud fallback occurs only after the configured provider chain fails; successful DeepL use prevents a Cloud job. DeepL calls are split under 96 KiB and blank cues are skipped (a whole subtitle file is HTTP 413; an empty cue is HTTP 400). A dropped Ray poll or result download is retried. DeepL quota (HTTP 456 / usage limit) sticky-skips DeepL until usage recovers; if Ray Local also fails, the chain proceeds to Ray Cloud. Failed rows already on the Translations page stay Failed until Retry.
 
 ## Behaviour notes
 
@@ -100,7 +100,7 @@ Batch mode does not call built-in DeepL itself. This plugin reads that list and 
 - The plugin writes one temp SRT per media file to **`/volume33/ray-output/lingarr-tmp/`** and submits paths as **`/out/lingarr-tmp/…`** (Ray’s usual `ray-output` → `/out` mount). Override those constants if your layout differs.
 - Lingarr translate does **not** need the video file — only the EN SRT batch (unlike Ray create-from-video).
 - **Quota pause ≠ Lingarr Failed:** newer Ray keeps Cloud jobs **Queued** with `allowance_wait.code=cloud_daily_video_limit_reached` until midnight UTC (or room frees). The plugin still polls; if `ray_job_timeout_minutes` elapses first, Lingarr marks the request Failed (`TaskCanceledException` / “All configured batch translation services failed”) while Ray still shows Queued. Raise the timeout (default 1440); do not mass-Retry the same UTC day.
-- **Quota:** with `ray_target=cloud`, each translate job can consume Ray Cloud’s **daily whole-video allowance** (same counter as create-from-video; resets midnight UTC). Drip-feed Lingarr automation. On hosts where local Sunlight is unreliable (e.g. Intel Arc UMA NAS), keep `cloud` and use another translator for bulk overflow.
+- **Quota:** a Ray Cloud fallback can consume Ray Cloud’s **daily whole-video allowance** (same counter as create-from-video; resets midnight UTC). Cloud jobs may remain queued until allowance resets; keep `ray_job_timeout_minutes` at 1440. Drip-feed Lingarr automation.
 - **Do not confuse** Ray Jobs **Failed** `track_choice_required` (“more than one audio track”) on create-from-video / multi-audio files with quota pause or Lingarr SRT translate jobs (`lingarr-ray-*.srt`).
 
 ## License

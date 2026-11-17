@@ -17,6 +17,46 @@ public class ProviderOrderTests
     }
 
     [Fact]
+    public void WithCloudFallback_AddsRayCloudAfterConfiguredProvidersForLocalTarget()
+    {
+        var attempts = ProviderOrder.WithCloudFallback(
+            ["ray", "deepl"],
+            "local");
+
+        Assert.Equal(["ray", "deepl", "ray-cloud"], attempts);
+    }
+
+    [Fact]
+    public void WithCloudFallback_DoesNotAddDuplicateCloudJobForCloudTarget()
+    {
+        var attempts = ProviderOrder.WithCloudFallback(
+            ["ray", "deepl"],
+            "cloud");
+
+        Assert.Equal(["ray", "deepl"], attempts);
+    }
+
+    [Fact]
+    public void WithCloudFallback_RecognizesLocalTargetWithoutCaseSensitivity()
+    {
+        var attempts = ProviderOrder.WithCloudFallback(
+            ["ray", "deepl"],
+            "LOCAL");
+
+        Assert.Equal(["ray", "deepl", "ray-cloud"], attempts);
+    }
+
+    [Fact]
+    public void WithCloudFallback_DoesNotAddCloudWhenRayIsNotConfigured()
+    {
+        var attempts = ProviderOrder.WithCloudFallback(
+            ["deepl"],
+            "local");
+
+        Assert.Equal(["deepl"], attempts);
+    }
+
+    [Fact]
     public void Resolve_UsesServicesListWhenDeepLIsPrimary()
     {
         var order = ProviderOrder.Resolve(
