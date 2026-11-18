@@ -29,7 +29,7 @@ dotnet test Lingarr.Plugin.Ray.Tests/Lingarr.Plugin.Ray.Tests.csproj \
 
 Copy into your plugins folder:
 
-- `Lingarr.Plugin.Ray.dll` (**1.2.4**: Ray Local → LibreTranslate → DeepL → Ray Cloud, when configured)
+- `Lingarr.Plugin.Ray.dll` (**1.2.5**: DeepL/Ray Local order + optional ray_cloud_fallback)
 
 ## Deploy (Compose volume)
 
@@ -72,8 +72,9 @@ Prefer the volume-mounted DLL model on production hosts. If you bake an image, k
 | Ray API key | `ray_api_key` | Secret / encrypted |
 | LibreTranslate URL (optional) | `ray_libretranslate_endpoint` | Default `http://127.0.0.1:5001`; used only when LibreTranslate is in the provider order. |
 | DeepL API key (optional override) | `ray_deepl_api_key` | Leave empty. The key on the **DeepL** service row is used. |
-| Provider order override | `ray_provider_order` | Optional comma-separated order, e.g. `ray,libretranslate,deepl`. When set, overrides the Services list. |
-| Ray processing target | `ray_target` | `local` (default) or `cloud`. Set in Lingarr Settings; Compose `RAY_TARGET` is a hint only on stock Lingarr. With `local`, Ray Cloud is attempted after the configured Services-list providers fail. Cloud translate shares the daily whole-video admit cap. |
+| Provider order override | `ray_provider_order` | Optional comma-separated order, e.g. `deepl,ray` or `ray,libretranslate,deepl`. When set, overrides the Services list. |
+| Ray processing target | `ray_target` | `local` (default) or `cloud`. Compose `RAY_TARGET` is a hint only on stock Lingarr. |
+| Ray Cloud fallback after Local | `ray_cloud_fallback` | `true` (default) appends Ray Cloud after configured providers when `ray_target=local`; `false` keeps Lingarr on the configured list only (use when Cloud admits are reserved for manual create / scheduled spillover). |
 | Ray job timeout (minutes) | `ray_job_timeout_minutes` | Default **`1440`** (clamped 1–2880). Must outlast Cloud `allowance_wait` until midnight UTC. |
 
 Each Lingarr subtitle file becomes **one** Ray translate job when Ray is used (keep Lingarr `max_batch_size=0`).
@@ -86,10 +87,10 @@ Without an override, the plugin follows the **Services** list. Set `ray_provider
 
 | Services list / override | What runs |
 |---------------|-----------|
-| Ray then DeepL; override empty | Ray Local → DeepL → Ray Cloud |
-| Override `ray,libretranslate,deepl` | Ray Local → LibreTranslate → DeepL → Ray Cloud |
-| Override `deepl,ray` | DeepL → Ray Local → Ray Cloud |
-| Ray only; override empty | Ray Local → Ray Cloud |
+| Ray then DeepL; override empty; cloud fallback on | Ray Local → DeepL → Ray Cloud |
+| Override `deepl,ray`; `ray_cloud_fallback=false` | DeepL → Ray Local (no Cloud) |
+| Override `deepl,ray`; cloud fallback on | DeepL → Ray Local → Ray Cloud |
+| Override `ray,libretranslate,deepl` | Ray Local → LibreTranslate → DeepL → (+ Cloud if fallback on) |
 
 Put the DeepL API key on the **DeepL** row. Leave **DeepL API key override** on Ray Local empty. LibreTranslate needs no API key; batches are split under 64 KiB and blank cues are preserved but not sent.
 

@@ -17,8 +17,9 @@ namespace Lingarr.Plugin.Ray;
 /// <summary>
 /// Lingarr community plugin: batch-translates subtitle cues via Ray Headless (Sunlight).
 /// Optional LibreTranslate and DeepL providers can be ordered with
-/// <c>ray_provider_order</c>. When Ray is local, Ray Cloud is the final fallback after
-/// the configured providers. DeepL quota uses a sticky skip until usage recovers.
+/// <c>ray_provider_order</c>. When Ray is local, Ray Cloud may be appended after the
+/// configured providers if <c>ray_cloud_fallback</c> is enabled (default true).
+/// DeepL quota uses a sticky skip until usage recovers.
 /// Provider id: <c>ray</c>. Plugin API 1.0.
 /// </summary>
 [PluginProvider("ray")]
@@ -39,6 +40,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
     private string? _deepLApiKey;
     private IReadOnlyList<string> _providerOrder = [ProviderOrder.Ray];
     private string _target = "local";
+    private bool _cloudFallbackEnabled = true;
     private int _timeoutMinutes = 180;
     private bool _initialized;
 
@@ -81,7 +83,8 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         var batch = subtitleBatch.ToArray();
         Exception? lastError = null;
 
-        var attemptOrder = ProviderOrder.WithCloudFallback(_providerOrder, _target);
+        var attemptOrder = ProviderOrder.WithCloudFallback(
+            _providerOrder, _target, _cloudFallbackEnabled);
         foreach (var provider in attemptOrder)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -269,20 +272,26 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         _deepLApiKey = FirstNonEmpty(pluginKey, builtInKey);
 
         var previous = string.Join(",", _providerOrder);
+        var previousCloud = _cloudFallbackEnabled;
         _providerOrder = ProviderOrder.Resolve(
             await _settings.GetSettingAsync("ray_provider_order"),
             await _settings.GetSettingAsync("service_type"),
             deepLConfigured: _deepLApiKey is not null);
+        _cloudFallbackEnabled = ProviderOrder.ParseCloudFallback(
+            await _settings.GetSettingAsync("ray_cloud_fallback"),
+            defaultValue: true);
 
         var next = string.Join(",", _providerOrder);
-        if (!string.Equals(previous, next, StringComparison.Ordinal))
+        if (!string.Equals(previous, next, StringComparison.Ordinal)
+            || previousCloud != _cloudFallbackEnabled)
         {
             _logger.LogInformation(
-                "Provider order: {Order} (DeepL key: {Source}).",
+                "Provider order: {Order} (DeepL key: {Source}; Cloud fallback: {CloudFallback}).",
                 string.Join(" → ", _providerOrder),
                 _deepLApiKey is null
                     ? "missing"
-                    : string.IsNullOrWhiteSpace(pluginKey) ? "DeepL service" : "Ray Local override");
+                    : string.IsNullOrWhiteSpace(pluginKey) ? "DeepL service" : "Ray Local override",
+                _cloudFallbackEnabled);
         }
 
         cancellationToken.ThrowIfCancellationRequested();

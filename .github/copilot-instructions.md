@@ -8,7 +8,7 @@ Canonical **Lingarr.Plugin.Ray** source (v1.2+). Stack ops live in [`b0ril/multi
 |------|--------|
 | Provider id | `ray` |
 | Assembly | `Lingarr.Plugin.Ray` |
-| Version | **1.2.4** (Ray Local, LibreTranslate, DeepL, Ray Cloud fallback) |
+| Version | **1.2.5** (ordered DeepL/Ray/LibreTranslate + optional `ray_cloud_fallback`) |
 | Plugin API | 1.0 (`LingarrPluginApiVersion`) |
 | Interfaces | `ITranslationService`, `IBatchTranslationService` |
 | Setting keys | `ray_endpoint`, `ray_api_key`, `ray_target`, `ray_job_timeout_minutes`; optional `ray_libretranslate_endpoint`, `ray_deepl_api_key`, `ray_provider_order`. DeepL key normally comes from `deepl_api_key`. |

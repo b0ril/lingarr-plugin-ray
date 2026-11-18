@@ -10,7 +10,7 @@ public sealed class RayPluginManifest : IPluginManifest
     public string DisplayName => "Ray Local";
 
     public string? Description =>
-        "Community plugin: batch-translates with Ray Headless (Sunlight). Optional LibreTranslate and DeepL providers can be ordered with Provider order override; the DeepL key stays on the DeepL service row. With Ray Local selected, Ray Cloud is the final fallback if configured providers fail.";
+        "Community plugin: batch-translates with Ray Headless (Sunlight). Optional LibreTranslate and DeepL providers can be ordered with Provider order override; the DeepL key stays on the DeepL service row. Ray Cloud fallback after Local is optional (ray_cloud_fallback).";
 
     public IReadOnlyList<PluginSettingField> Settings { get; } =
     [
@@ -65,7 +65,16 @@ public sealed class RayPluginManifest : IPluginManifest
             Type = PluginSettingType.Text,
             Required = true,
             Default = "local",
-            Description = "local = Ray Local, then configured providers (e.g. DeepL), then Ray Cloud if none succeeds; cloud = Ray Cloud directly. Cloud translate shares the daily whole-video admit cap with create-from-video."
+            Description = "local = Ray Local (and optional Cloud fallback via ray_cloud_fallback); cloud = Ray Cloud directly. Cloud translate shares the daily whole-video admit cap with create-from-video."
+        },
+        new()
+        {
+            Key = "ray_cloud_fallback",
+            Label = "Ray Cloud fallback after Local",
+            Type = PluginSettingType.Text,
+            Required = false,
+            Default = "true",
+            Description = "When ray_target=local and Ray is in the provider order: true (default) appends Ray Cloud after configured providers fail; false keeps daytime Lingarr on DeepL/Ray Local only so Cloud admits stay free for manual create or a scheduled spillover."
         },
         new()
         {

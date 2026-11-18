@@ -38,6 +38,28 @@ public class ProviderOrderTests
     }
 
     [Fact]
+    public void WithCloudFallback_SkipsCloudWhenDisabled()
+    {
+        var attempts = ProviderOrder.WithCloudFallback(
+            ["deepl", "ray"],
+            "local",
+            cloudFallbackEnabled: false);
+
+        Assert.Equal(["deepl", "ray"], attempts);
+    }
+
+    [Fact]
+    public void WithCloudFallback_DoesNotDuplicateExplicitCloudToken()
+    {
+        var attempts = ProviderOrder.WithCloudFallback(
+            ["deepl", "ray", "ray-cloud"],
+            "local",
+            cloudFallbackEnabled: true);
+
+        Assert.Equal(["deepl", "ray", "ray-cloud"], attempts);
+    }
+
+    [Fact]
     public void WithCloudFallback_DoesNotAddDuplicateCloudJobForCloudTarget()
     {
         var attempts = ProviderOrder.WithCloudFallback(
@@ -65,6 +87,20 @@ public class ProviderOrderTests
             "local");
 
         Assert.Equal(["deepl"], attempts);
+    }
+
+    [Theory]
+    [InlineData(null, true, true)]
+    [InlineData("", true, true)]
+    [InlineData("false", true, false)]
+    [InlineData("off", false, false)]
+    [InlineData("true", false, true)]
+    public void ParseCloudFallback_ReadsCommonTruthyFalsyTokens(
+        string? raw,
+        bool defaultValue,
+        bool expected)
+    {
+        Assert.Equal(expected, ProviderOrder.ParseCloudFallback(raw, defaultValue));
     }
 
     [Fact]

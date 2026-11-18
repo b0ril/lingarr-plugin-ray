@@ -14,17 +14,40 @@ public static class ProviderOrder
     public const string LibreTranslate = "libretranslate";
     public const string DeepL = "deepl";
 
+    /// <param name="cloudFallbackEnabled">
+    /// When false, Ray Local does not append Ray Cloud after the configured providers.
+    /// Use this so daytime Lingarr (DeepL → Ray Local) does not burn Cloud admits reserved
+    /// for manual create / end-of-day spillover.
+    /// </param>
     public static IReadOnlyList<string> WithCloudFallback(
         IReadOnlyList<string> order,
-        string rayTarget)
+        string rayTarget,
+        bool cloudFallbackEnabled = true)
     {
-        if (!string.Equals(rayTarget, "local", StringComparison.OrdinalIgnoreCase)
-            || !order.Contains(Ray, StringComparer.Ordinal))
+        if (!cloudFallbackEnabled
+            || !string.Equals(rayTarget, "local", StringComparison.OrdinalIgnoreCase)
+            || !order.Contains(Ray, StringComparer.Ordinal)
+            || order.Contains(RayCloud, StringComparer.Ordinal))
         {
             return order;
         }
 
         return [.. order, RayCloud];
+    }
+
+    public static bool ParseCloudFallback(string? raw, bool defaultValue = true)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return defaultValue;
+        }
+
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "1" or "true" or "yes" or "on" => true,
+            "0" or "false" or "no" or "off" => false,
+            _ => defaultValue
+        };
     }
 
     public static IReadOnlyList<string> Resolve(
