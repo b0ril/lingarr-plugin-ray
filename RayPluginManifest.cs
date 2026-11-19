@@ -10,7 +10,7 @@ public sealed class RayPluginManifest : IPluginManifest
     public string DisplayName => "Ray Local";
 
     public string? Description =>
-        "Community plugin: batch-translates with Ray Headless (Sunlight). Optional LibreTranslate and DeepL providers can be ordered with Provider order override; the DeepL key stays on the DeepL service row. Ray Cloud fallback after Local is optional (ray_cloud_fallback).";
+        "Community plugin: batch-translates with Ray Headless (Sunlight/Moonlight via ray_quality). Optional LibreTranslate and DeepL providers can be ordered with Provider order override; the DeepL key stays on the DeepL service row. Ray Cloud fallback after Local is optional (ray_cloud_fallback).";
 
     public IReadOnlyList<PluginSettingField> Settings { get; } =
     [
@@ -66,6 +66,15 @@ public sealed class RayPluginManifest : IPluginManifest
             Required = true,
             Default = "local",
             Description = "local = Ray Local (and optional Cloud fallback via ray_cloud_fallback); cloud = Ray Cloud directly. Cloud translate shares the daily whole-video admit cap with create-from-video."
+        },
+        new()
+        {
+            Key = "ray_quality",
+            Label = "Ray quality",
+            Type = PluginSettingType.Text,
+            Required = true,
+            Default = "best",
+            Description = "best/sunlight (default, higher quality, slower on Local CPU) or fast/moonlight (quicker drafts; less likely to hit Ray Local's 30-minute no-progress stop on heavy batches)."
         },
         new()
         {

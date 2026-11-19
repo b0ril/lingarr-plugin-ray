@@ -15,12 +15,12 @@ using Microsoft.Extensions.Logging;
 namespace Lingarr.Plugin.Ray;
 
 /// <summary>
-/// Lingarr community plugin: batch-translates subtitle cues via Ray Headless (Sunlight).
-/// Optional LibreTranslate and DeepL providers can be ordered with
-/// <c>ray_provider_order</c>. When Ray is local, Ray Cloud may be appended after the
-/// configured providers if <c>ray_cloud_fallback</c> is enabled (default true).
-/// DeepL quota uses a sticky skip until usage recovers.
-/// Provider id: <c>ray</c>. Plugin API 1.0.
+/// Lingarr community plugin: batch-translates subtitle cues via Ray Headless
+/// (Sunlight/Moonlight via <c>ray_quality</c>). Optional LibreTranslate and DeepL
+/// providers can be ordered with <c>ray_provider_order</c>. When Ray is local,
+/// Ray Cloud may be appended after the configured providers if
+/// <c>ray_cloud_fallback</c> is enabled (default true). DeepL quota uses a sticky
+/// skip until usage recovers. Provider id: <c>ray</c>. Plugin API 1.0.
 /// </summary>
 [PluginProvider("ray")]
 public sealed class RayTranslationService : ITranslationService, IBatchTranslationService, IDisposable
@@ -40,6 +40,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
     private string? _deepLApiKey;
     private IReadOnlyList<string> _providerOrder = [ProviderOrder.Ray];
     private string _target = "local";
+    private string _quality = "best";
     private bool _cloudFallbackEnabled = true;
     private int _timeoutMinutes = 180;
     private bool _initialized;
@@ -50,10 +51,16 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         _logger = logger;
     }
 
-    public string? ModelName =>
-        string.IsNullOrWhiteSpace(_deepLApiKey)
-            ? "Sunlight (Ray Local)"
-            : "DeepL + Sunlight (Ray)";
+    public string? ModelName
+    {
+        get
+        {
+            var qualityLabel = _quality == "fast" ? "Moonlight" : "Sunlight";
+            return string.IsNullOrWhiteSpace(_deepLApiKey)
+                ? $"{qualityLabel} (Ray Local)"
+                : $"DeepL + {qualityLabel} (Ray)";
+        }
+    }
 
     public async Task<string> TranslateAsync(
         string text,
@@ -103,9 +110,9 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
                     ProviderOrder.LibreTranslate => await TranslateWithLibreTranslateAsync(
                         batch, sourceLanguage, targetLanguage, cancellationToken),
                     ProviderOrder.Ray => await TranslateWithRayAsync(
-                        batch, targetLanguage, _target, cancellationToken),
+                        batch, sourceLanguage, targetLanguage, _target, cancellationToken),
                     ProviderOrder.RayCloud => await TranslateWithRayAsync(
-                        batch, targetLanguage, "cloud", cancellationToken),
+                        batch, sourceLanguage, targetLanguage, "cloud", cancellationToken),
                     _ => null
                 };
 
@@ -145,13 +152,15 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
 
     private async Task<Dictionary<int, string>> TranslateWithRayAsync(
         BatchSubtitleItem[] batch,
+        string sourceLanguage,
         string targetLanguage,
         string rayTarget,
         CancellationToken cancellationToken)
     {
         // One Lingarr subtitle file (batch) → one Ray translate job.
         // Lingarr already sends the full SRT when max_batch_size is 0.
-        var result = await TranslateSrtBatchAsync(batch, targetLanguage, rayTarget, cancellationToken);
+        var result = await TranslateSrtBatchAsync(
+            batch, sourceLanguage, targetLanguage, rayTarget, cancellationToken);
         if (result.Count != batch.Length)
         {
             throw new TranslationException(
@@ -172,7 +181,11 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
 
     public Task<ModelsResponse> GetModels() => Task.FromResult(new ModelsResponse
     {
-        Options = [new LabelValue { Label = "Sunlight", Value = "best" }]
+        Options =
+        [
+            new LabelValue { Label = "Sunlight", Value = "best" },
+            new LabelValue { Label = "Moonlight", Value = "fast" }
+        ]
     });
 
     public Task<LanguagePair?> GetLanguagePair(
@@ -237,6 +250,9 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
                 throw new InvalidOperationException("Ray processing target must be 'local' or 'cloud'.");
             }
 
+            _quality = RayTranslateRequest.NormalizeQuality(
+                await _settings.GetSettingAsync("ray_quality"));
+
             // Cloud jobs may sit Queued under allowance_wait until midnight UTC.
             // Cap high enough to outlast a full daily reset wait (not Hangfire's default 3h).
             _timeoutMinutes = ParseBoundedSetting(
@@ -273,6 +289,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
 
         var previous = string.Join(",", _providerOrder);
         var previousCloud = _cloudFallbackEnabled;
+        var previousQuality = _quality;
         _providerOrder = ProviderOrder.Resolve(
             await _settings.GetSettingAsync("ray_provider_order"),
             await _settings.GetSettingAsync("service_type"),
@@ -280,18 +297,22 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         _cloudFallbackEnabled = ProviderOrder.ParseCloudFallback(
             await _settings.GetSettingAsync("ray_cloud_fallback"),
             defaultValue: true);
+        _quality = RayTranslateRequest.NormalizeQuality(
+            await _settings.GetSettingAsync("ray_quality"));
 
         var next = string.Join(",", _providerOrder);
         if (!string.Equals(previous, next, StringComparison.Ordinal)
-            || previousCloud != _cloudFallbackEnabled)
+            || previousCloud != _cloudFallbackEnabled
+            || !string.Equals(previousQuality, _quality, StringComparison.Ordinal))
         {
             _logger.LogInformation(
-                "Provider order: {Order} (DeepL key: {Source}; Cloud fallback: {CloudFallback}).",
+                "Provider order: {Order} (DeepL key: {Source}; Cloud fallback: {CloudFallback}; quality: {Quality}).",
                 string.Join(" → ", _providerOrder),
                 _deepLApiKey is null
                     ? "missing"
                     : string.IsNullOrWhiteSpace(pluginKey) ? "DeepL service" : "Ray Local override",
-                _cloudFallbackEnabled);
+                _cloudFallbackEnabled,
+                _quality);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -449,6 +470,7 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
 
     private async Task<List<string>> TranslateSrtBatchAsync(
         BatchSubtitleItem[] batch,
+        string sourceLanguage,
         string targetLanguage,
         string rayTarget,
         CancellationToken cancellationToken)
@@ -462,7 +484,8 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
 
         try
         {
-            var jobId = await CreateJobAsync(rayPath, targetLanguage, rayTarget, cancellationToken);
+            var jobId = await CreateJobAsync(
+                rayPath, sourceLanguage, targetLanguage, rayTarget, cancellationToken);
             await WaitForCompletionAsync(jobId, cancellationToken);
             var translatedSrt = await DownloadResultAsync(jobId, cancellationToken);
             return ParseSrt(Encoding.UTF8.GetString(translatedSrt));
@@ -479,23 +502,20 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
 
     private async Task<string> CreateJobAsync(
         string subtitlePath,
+        string sourceLanguage,
         string targetLanguage,
         string rayTarget,
         CancellationToken cancellationToken)
     {
         // Ray docs: translate with subtitle_source=translate + subtitle_path.
         // file_path must also be the subtitle path (media reference; not read for translate).
-        var request = new Dictionary<string, object>
-        {
-            ["quality"] = "best",
-            ["format"] = "srt",
-            ["coverage"] = "standard",
-            ["target"] = rayTarget,
-            ["subtitle_source"] = "translate",
-            ["target_language"] = targetLanguage,
-            ["file_path"] = subtitlePath,
-            ["subtitle_path"] = subtitlePath
-        };
+        // Pass source_language when Lingarr knows it — avoids local_subtitle_language_unknown.
+        var request = RayTranslateRequest.Build(
+            subtitlePath,
+            sourceLanguage,
+            targetLanguage,
+            _quality,
+            rayTarget);
 
         using var response = await SendJsonAsync(
             HttpMethod.Post,
@@ -509,8 +529,12 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         }
 
         _logger.LogInformation(
-            "Submitted subtitle batch {Path} to Ray ({Target}) as job {JobId}.",
-            subtitlePath, rayTarget, jobId);
+            "Submitted subtitle batch {Path} to Ray ({Target}, quality={Quality}, source={Source}) as job {JobId}.",
+            subtitlePath,
+            rayTarget,
+            _quality,
+            string.IsNullOrWhiteSpace(sourceLanguage) ? "(detect)" : sourceLanguage.Trim(),
+            jobId);
         return jobId;
     }
 
