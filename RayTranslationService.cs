@@ -509,7 +509,8 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
     {
         // Ray docs: translate with subtitle_source=translate + subtitle_path.
         // file_path must also be the subtitle path (media reference; not read for translate).
-        // Pass source_language when Lingarr knows it — avoids local_subtitle_language_unknown.
+        // Never send source_language here — Ray rejects it on translate jobs
+        // (source_language_not_used); only automatic/generate_from_audio may use it.
         var request = RayTranslateRequest.Build(
             subtitlePath,
             sourceLanguage,
@@ -529,11 +530,10 @@ public sealed class RayTranslationService : ITranslationService, IBatchTranslati
         }
 
         _logger.LogInformation(
-            "Submitted subtitle batch {Path} to Ray ({Target}, quality={Quality}, source={Source}) as job {JobId}.",
+            "Submitted subtitle batch {Path} to Ray ({Target}, quality={Quality}) as job {JobId}.",
             subtitlePath,
             rayTarget,
             _quality,
-            string.IsNullOrWhiteSpace(sourceLanguage) ? "(detect)" : sourceLanguage.Trim(),
             jobId);
         return jobId;
     }

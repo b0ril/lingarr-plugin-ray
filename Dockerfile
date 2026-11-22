@@ -1,6 +1,6 @@
-# Builds stock Lingarr + Lingarr.Plugin.Ray (community plugin API 1.0, v1.2.6+).
+# Builds stock Lingarr + Lingarr.Plugin.Ray (community plugin API 1.0, v1.2.7+).
 # Watchtower must stay disabled on the resulting image tag, or a Hub pull drops /app/plugins.
-ARG LINGARR_BASE=lingarr/lingarr:1.4.1
+ARG LINGARR_BASE=lingarr/lingarr:1.5.0
 
 FROM ${LINGARR_BASE} AS lingarr
 

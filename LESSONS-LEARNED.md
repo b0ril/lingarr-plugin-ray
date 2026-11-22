@@ -2,6 +2,16 @@
 
 Ops-facing history for this plugin and Ray Headless. Stack Compose / NAS pins live in [`b0ril/multimedia`](https://github.com/b0ril/multimedia) (`LESSONS-LEARNED.md`, `newnas/ray-lingarr-plugin/`).
 
+## 2026-11-23 — Lingarr 1.5.0 + plugin 1.2.7 (`source_language_not_used`)
+
+**Symptom:** Daytime Lingarr Failed with `All configured providers failed (DeepL → Ray Local)` and Ray HTTP 400 `source_language_not_used` (“source_language is only for subtitles made from the audio”).
+
+**Cause:** Plugin 1.2.6 sent `source_language` on `subtitle_source=translate`. Ray now rejects that field unless the job is `automatic` / `generate_from_audio`. Separately, DeepL Free often sits at `500000/500000`, so the chain falls through to Ray Local and long files hit `local_stalled`.
+
+**Fix:** Plugin **1.2.7** omits `source_language` on translate submits. Build against Hub **`lingarr/lingarr:1.5.0`**. On Lingarr 1.5.0, plugin settings move to `/api/translationservice/{id}/settings`; keep services UI **DeepL → Ray** and `ray_provider_order=deepl,ray`.
+
+**Do not:** re-add `source_language` “for Local language detect” — that is the regression.
+
 ## 2026-11-19 — Ray `local_stalled` at translating / 40% (upstream)
 
 **Symptom:** Lingarr → Ray Local Sunlight (`quality=best`) jobs fail after exactly ~1800s with:
@@ -17,11 +27,12 @@ Progress stuck at **40%**, stage **`translating`**. Short files often succeed (~
 | Issue | Reality |
 |-------|---------|
 | Cloud `waiting_for_allowance` | Not stuck. Daily admit was **5 videos/day** at 00:00 UTC; large queues take months. Ray checking plan allowance. |
-| `local_subtitle_language_unknown` | Temp `lingarr-ray-*.srt` names have no language tag. Ray **ignores** `source_language` / `subtitle_source_language` on **local** jobs today (upstream bug). Fix coming; plugin already sends `source_language` (v1.2.6). |
+| `local_subtitle_language_unknown` | Temp `lingarr-ray-*.srt` names have no language tag. |
+| `source_language_not_used` | Ray **rejects** `source_language` on `subtitle_source=translate` (only `automatic` / `generate_from_audio`). |
 
-**Plugin / ops response (v1.2.6):**
+**Plugin / ops response (v1.2.7):**
 
-- Send **`source_language`** on translate submits when Lingarr knows it (ready for Ray’s fix).
+- **Omit `source_language`** on translate submits (v1.2.6 sending it caused HTTP 400 / Lingarr Failed).
 - Setting **`ray_quality`**: `best`/`sunlight` (default) or `fast`/`moonlight` — Moonlight is lighter on Local CPU and less likely to exceed 30 minutes until Ray ships the progress-timer fix.
 - Until Ray updates: avoid auto-retry storms on long Local failures; prefer DeepL / Cloud for heavy files; do not mass-Retry the same stalls.
 

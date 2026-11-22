@@ -34,8 +34,10 @@ public class RayTranslateRequestTests
     }
 
     [Fact]
-    public void Build_IncludesSourceLanguageAndQuality()
+    public void Build_OmitsSourceLanguageOnTranslateJobs()
     {
+        // Ray rejects source_language unless subtitle_source is automatic/generate_from_audio
+        // (error_code source_language_not_used). Translate jobs must leave it out.
         var body = RayTranslateRequest.Build(
             subtitlePath: "/out/lingarr-tmp/sample.srt",
             sourceLanguage: "en",
@@ -48,7 +50,7 @@ public class RayTranslateRequestTests
         Assert.Equal("standard", body["coverage"]);
         Assert.Equal("local", body["target"]);
         Assert.Equal("translate", body["subtitle_source"]);
-        Assert.Equal("en", body["source_language"]);
+        Assert.False(body.ContainsKey("source_language"));
         Assert.Equal("bg", body["target_language"]);
         Assert.Equal("/out/lingarr-tmp/sample.srt", body["file_path"]);
         Assert.Equal("/out/lingarr-tmp/sample.srt", body["subtitle_path"]);

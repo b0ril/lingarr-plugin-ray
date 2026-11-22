@@ -28,7 +28,12 @@ public static class RayTranslateRequest
         string quality,
         string rayTarget)
     {
-        var body = new Dictionary<string, object>
+        // Do not send source_language on subtitle_source=translate.
+        // Ray returns HTTP 400 source_language_not_used unless the job is
+        // automatic / generate_from_audio. sourceLanguage is kept on the
+        // signature for DeepL and call-site compatibility only.
+        _ = sourceLanguage;
+        return new Dictionary<string, object>
         {
             ["quality"] = NormalizeQuality(quality),
             ["format"] = "srt",
@@ -39,12 +44,5 @@ public static class RayTranslateRequest
             ["file_path"] = subtitlePath,
             ["subtitle_path"] = subtitlePath
         };
-
-        if (!string.IsNullOrWhiteSpace(sourceLanguage))
-        {
-            body["source_language"] = sourceLanguage.Trim();
-        }
-
-        return body;
     }
 }

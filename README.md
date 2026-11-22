@@ -6,7 +6,7 @@ Community plugin for [Lingarr](https://github.com/lingarr-translate/lingarr) tha
 |--|--|
 | Provider id | `ray` |
 | Assembly | `Lingarr.Plugin.Ray` |
-| Version | **1.2.6** |
+| Version | **1.2.7** |
 | Plugin API | 1.0 (`LingarrPluginApiVersion`) |
 | GitHub topic | [`lingarr-plugin`](https://github.com/topics/lingarr-plugin) |
 | Maintainer | [b0ril](https://github.com/b0ril) |
@@ -17,10 +17,10 @@ See [LESSONS-LEARNED.md](LESSONS-LEARNED.md) for upstream Ray bugs (`local_stall
 
 ## Build (DLL only)
 
-Requires .NET 10 SDK and `Lingarr.Contracts.dll` from a matching Lingarr release (1.4.x):
+Requires .NET 10 SDK and `Lingarr.Contracts.dll` from a matching Lingarr release (1.5.x):
 
 ```bash
-docker create --name lingarr-ref lingarr/lingarr:1.4.1
+docker create --name lingarr-ref lingarr/lingarr:1.5.0
 docker cp lingarr-ref:/app/Lingarr.Contracts.dll /tmp/Lingarr.Contracts.dll
 docker rm lingarr-ref
 
@@ -33,14 +33,14 @@ dotnet test Lingarr.Plugin.Ray.Tests/Lingarr.Plugin.Ray.Tests.csproj \
 
 Install the DLL into your plugins folder:
 
-- `Lingarr.Plugin.Ray.dll` (**1.2.6**: `source_language` on translate + `ray_quality` best/fast)
+- `Lingarr.Plugin.Ray.dll` (**1.2.7**: omit `source_language` on translate; `ray_quality` best/fast)
 
 ## Deploy (Compose volume)
 
 ```yaml
 services:
   lingarr:
-    image: lingarr/lingarr:1.4.1
+    image: lingarr/lingarr:1.5.0
     environment:
       PLUGINS_PATH: /app/plugins
     volumes:
@@ -55,15 +55,15 @@ Restart Lingarr and look for:
 Loaded plugin /app/plugins/Lingarr.Plugin.Ray.dll (1 manifest(s))
 ```
 
-Select **Ray Local** under **Settings → Services**. To add DeepL, add it on that same list and put the API key on the **DeepL** row. Leave the Ray Local DeepL override fields empty.
+Under **Settings → Services** (Lingarr 1.5.0+), keep **DeepL** above **Ray Local** in the list. Put the API key on the **DeepL** instance. Leave the Ray Local DeepL override empty. Optional `ray_provider_order=deepl,ray` still overrides the UI cascade for this plugin’s batch path.
 
 ## Deploy (custom image)
 
 This repo’s `Dockerfile` builds stock Lingarr with the plugin baked into `/app/plugins`:
 
 ```bash
-docker build -t lingarr-ray:1.4.1 \
-  --build-arg LINGARR_BASE=lingarr/lingarr:1.4.1 .
+docker build -t lingarr-ray:1.5.0 \
+  --build-arg LINGARR_BASE=lingarr/lingarr:1.5.0 .
 ```
 
 Prefer the volume-mounted DLL model on production hosts. If you bake an image, keep Watchtower **disabled** for that tag, or a Hub pull can replace the container and drop `/app/plugins`.
@@ -107,7 +107,7 @@ Batch mode does not call built-in DeepL itself. This plugin reads the Services l
 
 - **Content-Length:** JSON requests use `ByteArrayContent` (Ray rejects `Transfer-Encoding: chunked` with HTTP 411).
 - **Path-based translate:** Ray’s `/v1/subtitles` translate API needs `subtitle_source=translate` plus **`file_path` and `subtitle_path`** on a path Ray can read. Bare SRT uploads alone return `subtitle_required` / `file_path is required`.
-- **`source_language`:** when Lingarr knows the source language, the plugin sends it on the Ray job. Required once Ray honors it on Local (today Ray may still ignore it — see Known Ray issues).
+- **`source_language`:** omit on `subtitle_source=translate` — Ray returns `source_language_not_used` (only `automatic` / `generate_from_audio` may send it).
 - The plugin writes one temp SRT per media file to **`/volume33/ray-output/lingarr-tmp/`** and submits paths as **`/out/lingarr-tmp/…`** (Ray’s usual `ray-output` → `/out` mount). Override those constants if your layout differs.
 - Lingarr translate does **not** need the video file — only the EN SRT batch (unlike Ray create-from-video).
 - **Quota pause ≠ Lingarr Failed:** newer Ray keeps Cloud jobs **Queued** with `allowance_wait.code=cloud_daily_video_limit_reached` until midnight UTC (or room frees). The plugin still polls; if `ray_job_timeout_minutes` elapses first, Lingarr marks the request Failed (`TaskCanceledException` / “All configured batch translation services failed”) while Ray still shows Queued. Raise the timeout (default 1440); do not mass-Retry the same UTC day.
@@ -119,7 +119,7 @@ Batch mode does not call built-in DeepL itself. This plugin reads the Services l
 Confirmed by Ray support (Ral) against Headless **4.0.18-beta.1**:
 
 1. **`local_stalled` / “no progress for 30 minutes” at translating ~40%** — Local translate progress is not reported to the 30-minute safety timer. Long CPU Sunlight jobs are killed while still working. Fix forthcoming; until then prefer shorter files, `ray_quality=fast`, DeepL, or Cloud, and avoid auto-retry loops on the same stall.
-2. **`local_subtitle_language_unknown`** — Local jobs ignore `source_language` today; temp filenames have no language tag. Plugin sends `source_language` anyway (ready for Ray’s fix).
+2. **`local_subtitle_language_unknown`** — Local may still fail language detection on temp `lingarr-ray-*.srt` names. Do **not** send `source_language` on translate (Ray rejects it); language tag in the filename is the remaining lever if this returns.
 3. **Arc ASR GPU (`RAY_ASR_GPU=on`)** helps speech / nearby-check only; **translation remains on CPU**.
 4. Support via **`POST /v1/support/messages`** (+ remote-help on a failed job) is more reliable than Outlook → Intercom when mail NDRs.
 
